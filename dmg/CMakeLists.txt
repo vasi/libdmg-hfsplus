@@ -2,12 +2,6 @@ INCLUDE(FindOpenSSL)
 INCLUDE(FindZLIB)
 INCLUDE(FindBZip2)
 
-FIND_LIBRARY(CRYPTO_LIBRARIES crypto
-      PATHS
-      /usr/lib
-      /usr/local/lib
-   )
-
 IF(NOT ZLIB_FOUND)
 	message(FATAL_ERROR "zlib is required for dmg!")
 ENDIF(NOT ZLIB_FOUND)
@@ -27,7 +21,7 @@ add_library(dmg adc.c checksum.c dmgfile.c dmglib.c filevault.c io.c partition.c
 IF(OPENSSL_FOUND)
 	add_definitions(-DHAVE_CRYPT)
 	include_directories(${OPENSSL_INCLUDE_DIR})
-	target_link_libraries(dmg ${CRYPTO_LIBRARIES})
+	target_link_libraries(dmg ${OPENSSL_CRYPTO_LIBRARY} $<$<BOOL:${OPENSSL_USE_STATIC_LIBS}>:${CMAKE_DL_LIBS}>)
 	IF(WIN32)
 		TARGET_LINK_LIBRARIES(dmg gdi32)
 	ENDIF(WIN32)
