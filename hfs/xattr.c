@@ -174,8 +174,16 @@ static int updateAttributes(Volume* volume, HFSPlusAttrKey* skey, HFSPlusAttrRec
 	HFSPlusAttrKey key;
 	HFSPlusAttrRecord* record;
 	int ret, len;
+	int exact;
 
 	memcpy(&key, skey, skey->keyLength);
+
+	record = (HFSPlusAttrRecord*) search(volume->attrTree, (BTKey*)(&key), &exact, NULL, NULL);
+	if(exact && record) {
+		free(record);
+		record = NULL;
+		removeFromBTree(volume->attrTree, (BTKey*)(&key));
+	}
 
 	switch(srecord->recordType) {
 		case kHFSPlusAttrInlineData:
@@ -183,24 +191,21 @@ static int updateAttributes(Volume* volume, HFSPlusAttrKey* skey, HFSPlusAttrRec
 			record = (HFSPlusAttrRecord*) malloc(len);
       			memcpy(record, srecord, len);
 			flipAttrData((HFSPlusAttrData*) record);
-			removeFromBTree(volume->attrTree, (BTKey*)(&key));
-      			ret = addToBTree(volume->attrTree, (BTKey*)(&key), len, (unsigned char *)record);
+			ret = addToBTree(volume->attrTree, (BTKey*)(&key), len, (unsigned char *)record);
 			free(record);
 			break;
 		case kHFSPlusAttrForkData:
 			record = (HFSPlusAttrRecord*) malloc(sizeof(HFSPlusAttrForkData));
       			memcpy(record, srecord, sizeof(HFSPlusAttrForkData));
 			flipAttrForkData((HFSPlusAttrForkData*) record);
-			removeFromBTree(volume->attrTree, (BTKey*)(&key));
-      			ret = addToBTree(volume->attrTree, (BTKey*)(&key), sizeof(HFSPlusAttrForkData), (unsigned char *)record);
+			ret = addToBTree(volume->attrTree, (BTKey*)(&key), sizeof(HFSPlusAttrForkData), (unsigned char *)record);
 			free(record);
 			break;
 		case kHFSPlusAttrExtents:
 			record = (HFSPlusAttrRecord*) malloc(sizeof(HFSPlusAttrExtents));
       			memcpy(record, srecord, sizeof(HFSPlusAttrExtents));
 			flipAttrExtents((HFSPlusAttrExtents*) record);
-			removeFromBTree(volume->attrTree, (BTKey*)(&key));
-      			ret = addToBTree(volume->attrTree, (BTKey*)(&key), sizeof(HFSPlusAttrExtents), (unsigned char *)record);
+			ret = addToBTree(volume->attrTree, (BTKey*)(&key), sizeof(HFSPlusAttrExtents), (unsigned char *)record);
 			free(record);
 			break;
 	}
