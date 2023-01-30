@@ -74,3 +74,12 @@ The makefile in the root folder will make all utilities.
 	cd hdiutil
 	make
 
+TESTING
+-------
+
+```bash
+# Create and activate a python virtual environment.
+python3 -m venv venv/
+source venv/bin/activate
+pip install cram
+```
