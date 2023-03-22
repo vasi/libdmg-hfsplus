@@ -7,6 +7,7 @@
 
 #include <hfs/hfsplus.h>
 #include "abstractfile.h"
+#include "common.h"
 
 #define CHECKSUM_UDIF_CRC32 0x00000002
 #define CHECKSUM_MD5 0x00000004
@@ -234,20 +235,6 @@ typedef struct ResourceKey {
 	struct ResourceKey* next;
 	FlipDataFunc flipData;
 } ResourceKey;
-
-#define SHA1_DIGEST_SIZE 20
-
-typedef struct {
-	uint32_t state[5];
-	uint32_t count[2];
-	uint8_t  buffer[64];
-} SHA1_CTX;
-
-typedef struct {
-	uint32_t block;
-	uint32_t crc;
-	SHA1_CTX sha1;
-} ChecksumToken;
 
 static inline uint32_t readUInt32(AbstractFile* file) {
 	uint32_t data;
