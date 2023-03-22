@@ -22,7 +22,7 @@ int buildInOut(const char* source, const char* dest, AbstractFile** in, Abstract
 		return FALSE;
 	}
 
-	*out = createAbstractFileFromFile(fopen(dest, "wb"));
+	*out = createAbstractFileFromFile(strcmp(dest, "-") == 0 ? stdout : fopen(dest, "wb"));
 	if(!(*out)) {
 		(*in)->close(*in);
 		printf("cannot open destination: %s\n", dest);
