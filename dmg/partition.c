@@ -514,13 +514,13 @@ int writeDriverDescriptorMap(int pNum, AbstractFile* file, DriverDescriptorRecor
   bufferFile = createAbstractFileFromMemory((void**)&buffer, DDM_SIZE * BlockSize);
   
   blkx = insertBLKX(file, bufferFile, DDM_OFFSET, DDM_SIZE, DDM_DESCRIPTOR, CHECKSUM_UDIF_CRC32, &CRCProxy, &uncompressedToken,
-			dataForkChecksum, dataForkToken, NULL, 0);
+            dataForkChecksum, dataForkToken, NULL, 0, NULL);
               
   blkx->checksum.data[0] = uncompressedToken.crc;
   
   char pName[100];
   sprintf(pName, "Driver Descriptor Map (DDM : %d)", pNum + 1);	
-  *resources = insertData(*resources, "blkx", pNum, pName, (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
+  *resources = insertData(*resources, "blkx", pNum, pName, 0, false, (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
   
   free(buffer);
   bufferFile->close(bufferFile);
@@ -552,7 +552,7 @@ int writeApplePartitionMap(int pNum, AbstractFile* file, Partition* partitions, 
   bufferFile = createAbstractFileFromMemory((void**)&buffer, realPartitionSize);
    
   blkx = insertBLKX(file, bufferFile, PARTITION_OFFSET * BlockSize / SECTOR_SIZE, realPartitionSize / SECTOR_SIZE, pNum, CHECKSUM_UDIF_CRC32,
-              &BlockCRC, &uncompressedToken, dataForkChecksum, dataForkToken, NULL, 0);
+              &BlockCRC, &uncompressedToken, dataForkChecksum, dataForkToken, NULL, 0, NULL);
   
   bufferFile->close(bufferFile);
 
@@ -564,8 +564,8 @@ int writeApplePartitionMap(int pNum, AbstractFile* file, Partition* partitions, 
 
   char pName[100];
   sprintf(pName, "Apple (Apple_partition_map : %d)", pNum + 1);	
-  *resources = insertData(*resources, "blkx", pNum, pName, (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
-  *resources = insertData(*resources, "cSum", 0, "", (const char*) (&csum), sizeof(csum), 0);
+  *resources = insertData(*resources, "blkx", pNum, pName, 0, false, (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
+  *resources = insertData(*resources, "cSum", 0, "", 0, false, (const char*) (&csum), sizeof(csum), 0);
   
   nsiz = (NSizResource*) malloc(sizeof(NSizResource));
   memset(nsiz, 0, sizeof(NSizResource));
@@ -606,12 +606,12 @@ int writeATAPI(int pNum, AbstractFile* file, unsigned int BlockSize, ChecksumFun
   if(BlockSize != SECTOR_SIZE)
   {
     blkx = insertBLKX(file, bufferFile, ATAPI_OFFSET, BlockSize / SECTOR_SIZE, pNum, CHECKSUM_UDIF_CRC32,
-                &BlockCRC, &uncompressedToken, dataForkChecksum, dataForkToken, NULL, 0);
+                &BlockCRC, &uncompressedToken, dataForkChecksum, dataForkToken, NULL, 0, NULL);
   }
   else
   {
     blkx = insertBLKX(file, bufferFile, ATAPI_OFFSET, ATAPI_SIZE, pNum, CHECKSUM_UDIF_CRC32,
-                &BlockCRC, &uncompressedToken, dataForkChecksum, dataForkToken, NULL, 0);
+                &BlockCRC, &uncompressedToken, dataForkChecksum, dataForkToken, NULL, 0, NULL);
   }
 
   bufferFile->close(bufferFile);
@@ -625,8 +625,8 @@ int writeATAPI(int pNum, AbstractFile* file, unsigned int BlockSize, ChecksumFun
 
   char pName[100];
   sprintf(pName, "Macintosh (Apple_Driver_ATAPI : %d)", pNum + 1);	
-  *resources = insertData(*resources, "blkx", pNum, pName, (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
-  *resources = insertData(*resources, "cSum", 1, "", (const char*) (&csum), sizeof(csum), 0);
+  *resources = insertData(*resources, "blkx", pNum, pName, 0, false, (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
+  *resources = insertData(*resources, "cSum", 1, "", 0, false, (const char*) (&csum), sizeof(csum), 0);
   
   nsiz = (NSizResource*) malloc(sizeof(NSizResource));
   memset(nsiz, 0, sizeof(NSizResource));
@@ -835,7 +835,7 @@ int writeFreePartition(int pNum, AbstractFile* outFile, uint32_t offset, uint32_
   
   char pName[100];
   sprintf(pName, " (Apple_Free : %d)", pNum + 1);
-  *resources = insertData(*resources, "blkx", pNum, pName, (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
+  *resources = insertData(*resources, "blkx", pNum, pName, 0, false, (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
 
   free(blkx);
   return pNum + 1;

@@ -1,6 +1,7 @@
 #include <string.h>
 #include "common.h"
 #include "abstractfile.h"
+#include <dmg/attribution.h>
 #include <dmg/dmg.h>
 #include <dmg/dmgfile.h>
 
@@ -87,7 +88,7 @@ uint32_t calculateMasterChecksum(ResourceKey* resources) {
 	return result;  
 }
 
-int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, unsigned int BlockSize) {	
+int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, unsigned int BlockSize, const char* sentinel) {
 	io_func* io;
 	Volume* volume;  
 	
@@ -147,15 +148,32 @@ int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, unsigned int B
 	printf("Writing main data blkx...\n"); fflush(stdout);
 	
 	abstractIn->seek(abstractIn, 0);
+
+	AbstractAttribution* attribution = NULL;
+	if (sentinel) {
+		attribution = createAbstractAttributionPreservingSentinel(sentinel);
+	}
+
+	if (attribution) {
+		attribution->beforeMainBlkx(attribution, abstractOut, &dataForkToken);
+	}
+
 	blkx = insertBLKX(abstractOut, abstractIn, USER_OFFSET, (volumeHeader->totalBlocks * volumeHeader->blockSize)/SECTOR_SIZE,
-				pNum, CHECKSUM_UDIF_CRC32, &BlockSHA1CRC, &uncompressedToken, &CRCProxy, &dataForkToken, volume, 0);
+				pNum, CHECKSUM_UDIF_CRC32, &BlockSHA1CRC, &uncompressedToken, &CRCProxy, &dataForkToken, volume, 0, attribution);
+
+	AttributionResource attributionResource;
+	memset(&attributionResource, 0, sizeof(AttributionResource));
+
+	if (attribution) {
+		attribution->afterMainBlkx(attribution, abstractOut, &dataForkToken, &attributionResource);
+	}
 	
 	blkx->checksum.data[0] = uncompressedToken.crc;
 	printf("Inserting main blkx...\n"); fflush(stdout);
 
 	char pName[100];
 	sprintf(pName, "Mac_OS_X (Apple_HFSX : %d)", pNum + 1);	
-	resources = insertData(resources, "blkx", pNum, pName, (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
+	resources = insertData(resources, "blkx", pNum, pName, 0, false, (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
 	free(blkx);
 
 	printf("Inserting cSum data...\n"); fflush(stdout);
@@ -164,7 +182,7 @@ int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, unsigned int B
 	csum.type = CHECKSUM_MKBLOCK;
 	csum.checksum = uncompressedToken.block;
 	
-	resources = insertData(resources, "cSum", 2, "", (const char*) (&csum), sizeof(csum), 0);
+	resources = insertData(resources, "cSum", 2, "", 0, false, (const char*) (&csum), sizeof(csum), 0);
 	
 	printf("Inserting nsiz data\n"); fflush(stdout);
 	
@@ -209,14 +227,14 @@ int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, unsigned int B
 	curResource = curResource->next;
 	releaseNSiz(nsiz);
 	
-	curResource->next = makePlst();
+	curResource->next = makePlst((const char*) (&attributionResource), sizeof(attributionResource), true);
 	curResource = curResource->next;
 	
 	curResource->next = makeSize(volumeHeader);
 	curResource = curResource->next;
 	
 	plistOffset = abstractOut->tell(abstractOut);
-	writeResources(abstractOut, resources);
+	writeResources(abstractOut, resources, true);
 	plistSize = abstractOut->tell(abstractOut) - plistOffset;
 	
 	printf("Generating UDIF metadata...\n"); fflush(stdout);
@@ -353,17 +371,17 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut) {
 			
 			abstractIn->seek(abstractIn, partitions[i].pmPyPartStart * BlockSize);
 			blkx = insertBLKX(abstractOut, abstractIn, partitions[i].pmPyPartStart, partitions[i].pmPartBlkCnt, i, CHECKSUM_UDIF_CRC32,
-						&BlockCRC, &uncompressedToken, &CRCProxy, &dataForkToken, NULL, 0);
+						&BlockCRC, &uncompressedToken, &CRCProxy, &dataForkToken, NULL, 0, NULL);
 			
 			blkx->checksum.data[0] = uncompressedToken.crc;	
-			resources = insertData(resources, "blkx", i, partitionName, (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
+			resources = insertData(resources, "blkx", i, partitionName, 0, false, (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
 			free(blkx);
 			
 			memset(&csum, 0, sizeof(CSumResource));
 			csum.version = 1;
 			csum.type = CHECKSUM_MKBLOCK;
 			csum.checksum = uncompressedToken.block;
-			resources = insertData(resources, "cSum", i, "", (const char*) (&csum), sizeof(csum), 0);
+			resources = insertData(resources, "cSum", i, "", 0, false, (const char*) (&csum), sizeof(csum), 0);
 			
 			if(nsiz == NULL) {
 				nsiz = myNSiz = (NSizResource*) malloc(sizeof(NSizResource));
@@ -394,16 +412,16 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut) {
 		
 		abstractIn->seek(abstractIn, 0);
 		blkx = insertBLKX(abstractOut, abstractIn, 0, fileLength/SECTOR_SIZE, ENTIRE_DEVICE_DESCRIPTOR, CHECKSUM_UDIF_CRC32,
-					&BlockCRC, &uncompressedToken, &CRCProxy, &dataForkToken, NULL, 0);
+					&BlockCRC, &uncompressedToken, &CRCProxy, &dataForkToken, NULL, 0, NULL);
 		blkx->checksum.data[0] = uncompressedToken.crc;
-		resources = insertData(resources, "blkx", 0, "whole disk (unknown partition : 0)", (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
+		resources = insertData(resources, "blkx", 0, "whole disk (unknown partition : 0)", 0, false, (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
 		free(blkx);
 		
 		memset(&csum, 0, sizeof(CSumResource));
 		csum.version = 1;
 		csum.type = CHECKSUM_MKBLOCK;
 		csum.checksum = uncompressedToken.block;
-		resources = insertData(resources, "cSum", 0, "", (const char*) (&csum), sizeof(csum), 0);
+		resources = insertData(resources, "cSum", 0, "", 0, false, (const char*) (&csum), sizeof(csum), 0);
 		
 		if(nsiz == NULL) {
 			nsiz = myNSiz = (NSizResource*) malloc(sizeof(NSizResource));
@@ -433,11 +451,13 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut) {
 	curResource = curResource->next;
 	releaseNSiz(nsiz);
 	
-	curResource->next = makePlst();
+	curResource->next = makePlst("", 0, false);
 	curResource = curResource->next;
 	
 	plistOffset = abstractOut->tell(abstractOut);
-	writeResources(abstractOut, resources);
+	// Note: Passing false here means that attribution data is not preserved through
+	// a `dmg convert` operation.
+	writeResources(abstractOut, resources, false);
 	plistSize = abstractOut->tell(abstractOut) - plistOffset;
 	
 	printf("Generating UDIF metadata...\n"); fflush(stdout);

@@ -122,6 +122,24 @@ static void flipCSumResource(unsigned char* data, char out) {
   FLIPENDIANLE(cSum->checksum);
 }
 
+static void flipAttributionResource(unsigned char* data, char out) {
+  AttributionResource* attribution;
+  attribution = (AttributionResource*) data;
+
+  FLIPENDIANLE(attribution->signature);
+  FLIPENDIANLE(attribution->version);
+  FLIPENDIANLE(attribution->rawPos);
+  FLIPENDIANLE(attribution->rawLength);
+  FLIPENDIANLE(attribution->rawChecksum);
+  FLIPENDIANLE(attribution->beforeCompressedChecksum);
+  FLIPENDIANLE(attribution->beforeCompressedLength);
+  FLIPENDIANLE(attribution->beforeUncompressedChecksum);
+  FLIPENDIANLE(attribution->beforeUncompressedLength);
+  FLIPENDIANLE(attribution->afterCompressedChecksum);
+  FLIPENDIANLE(attribution->afterCompressedLength);
+  FLIPENDIANLE(attribution->afterUncompressedChecksum);
+  FLIPENDIANLE(attribution->afterUncompressedLength);
+}
 
 static void flipBLKXRun(BLKXRun* data) {
   BLKXRun* run;
@@ -286,7 +304,47 @@ static unsigned char* getXMLData(char** location, size_t *dataLength, char** enc
   return toReturn;
 }
 
-static void readResourceData(ResourceData* data, char** location, char* xmlStart, FlipDataFunc flipData) {
+static unsigned char* getXMLPlstName(char** location, size_t *dataLength, char** encodedStart, size_t* encodedLength) {
+  char* curLoc;
+  char* tagEnd;
+  char* encodedData;
+  unsigned char* toReturn;
+  size_t strLen;
+
+  curLoc = *location;
+
+  curLoc = strstr(curLoc, "<string>");
+  if(!curLoc)
+    return NULL;
+  curLoc += sizeof("<string>") - 1;
+
+    if (encodedStart)
+        *encodedStart = curLoc;
+
+  tagEnd = strstr(curLoc, "</string>");
+
+
+  strLen = (size_t)(tagEnd - curLoc);
+
+    if (encodedLength)
+        *encodedLength = strLen;
+
+  encodedData = (char*) malloc(strLen + 1);
+  memcpy(encodedData, curLoc, strLen);
+  encodedData[strLen] = '\0';
+
+  curLoc = tagEnd + sizeof("</string>") - 1;
+
+  *location = curLoc;
+
+  toReturn = decodeBase64(encodedData, dataLength);
+
+  free(encodedData);
+
+  return toReturn;
+}
+
+static void readResourceData(ResourceData* data, char** location, char* xmlStart, FlipDataFunc flipData, const unsigned char* key, bool plstNameIsAttribution) {
   char* curLoc;
   char* tagBegin;
   char* tagEnd;
@@ -332,7 +390,16 @@ static void readResourceData(ResourceData* data, char** location, char* xmlStart
       sscanf(buffer, "%d", &(data->id));
       free(buffer);
     } else if(strncmp(tagBegin, "Name", strLen) == 0) {
-      data->name = getXMLString(&curLoc);
+      if (strcmp((char*) key, "plst") == 0 && plstNameIsAttribution) {
+	char *nameEncodedStart;
+	size_t nameXmlSize;
+	size_t nameLength;
+	unsigned char* attributionFromName = getXMLPlstName(&curLoc, &nameLength, &nameEncodedStart, &nameXmlSize);
+	data->name = attributionFromName;
+	flipAttributionResource(data->name, 0);
+      } else {
+	data->name = getXMLString(&curLoc);
+      }
     }
   }
   
@@ -552,7 +619,7 @@ void outResources(AbstractFile* file, AbstractFile* out)
 	out->close(out);
 }
 
-ResourceKey* readResources(char* xml, size_t length) {
+ResourceKey* readResources(char* xml, size_t length, bool plstNameIsAttribution) {
   char* curLoc;
   char* tagEnd;
   size_t strLen;
@@ -636,7 +703,7 @@ ResourceKey* readResources(char* xml, size_t length) {
       
       curData->next = NULL;
       
-      readResourceData(curData, &curLoc, xml, curResource->flipData);
+      readResourceData(curData, &curLoc, xml, curResource->flipData, curResource->key, plstNameIsAttribution);
       curLoc = strstr(curLoc, "<dict>");
     }
        
@@ -646,7 +713,7 @@ ResourceKey* readResources(char* xml, size_t length) {
   return toReturn;
 }
 
-static void writeResourceData(AbstractFile* file, ResourceData* data, ResourceKey* curResource, FlipDataFunc flipData, int tabLength) {
+static void writeResourceData(AbstractFile* file, ResourceData* data, ResourceKey* curResource, FlipDataFunc flipData, int tabLength, bool plstNameIsAttribution) {
   unsigned char* dataBuf;
   char* tabs;
   int i;
@@ -677,13 +744,23 @@ static void writeResourceData(AbstractFile* file, ResourceData* data, ResourceKe
   
   abstractFilePrint(file, "%s\t</data>\n", tabs);
   abstractFilePrint(file, "%s\t<key>ID</key>\n%s\t<string>%d</string>\n", tabs, tabs, data->id);
-  abstractFilePrint(file, "%s\t<key>Name</key>\n%s\t<string>%s</string>\n", tabs, tabs, data->name);
+  if (strcmp((char*) curResource->key, "plst") == 0 && plstNameIsAttribution) {
+    unsigned char* nameBuf = (unsigned char*) malloc(sizeof(AttributionResource));
+    memcpy(nameBuf, data->name, sizeof(AttributionResource));
+      flipAttributionResource(nameBuf, 1);
+    abstractFilePrint(file, "%s\t<key>Name</key>\n%s\t<string>\n", tabs, tabs);
+    writeBase64(file, nameBuf, sizeof(AttributionResource), tabLength + 1, 43);
+    abstractFilePrint(file, "%s\t</string>\n", tabs);
+  }
+  else {
+    abstractFilePrint(file, "%s\t<key>Name</key>\n%s\t<string>%s</string>\n", tabs, tabs, data->name);
+  }
   abstractFilePrint(file, "%s</dict>\n", tabs);
   
   free(tabs);
 }
 
-void writeResources(AbstractFile* file, ResourceKey* resources) {
+void writeResources(AbstractFile* file, ResourceKey* resources, bool plstNameIsAttribution) {
   ResourceKey* curResource;
   ResourceData* curData;
   
@@ -695,7 +772,7 @@ void writeResources(AbstractFile* file, ResourceKey* resources) {
     abstractFilePrint(file, "\t\t<key>%s</key>\n\t\t<array>\n", curResource->key);
     curData = curResource->data;
     while(curData != NULL) {
-	    writeResourceData(file, curData, curResource, curResource->flipData, 3);
+	    writeResourceData(file, curData, curResource, curResource->flipData, 3, plstNameIsAttribution);
 	    curData = curData->next;
     }
     abstractFilePrint(file, "\t\t</array>\n", curResource->key);
@@ -769,11 +846,11 @@ ResourceData* getDataByID(ResourceKey* resource, int id) {
   return NULL;
 }
 
-ResourceKey* insertData(ResourceKey* resources, const char* key, int id, const char* name, const char* data, size_t dataLength, uint32_t attributes) {
+ResourceKey* insertData(ResourceKey* resources, const char* key, int id, const char* name, size_t nameLength, bool nameAsData, const char* data, size_t dataLength, uint32_t attributes) {
   ResourceKey* curResource;
   ResourceKey* lastResource;
   ResourceData* curData;
-  
+
   lastResource = resources;
   curResource = resources;
   while(curResource != NULL) {
@@ -836,8 +913,14 @@ ResourceKey* insertData(ResourceKey* resources, const char* key, int id, const c
   curData->attributes = attributes;
   curData->dataLength = dataLength;
   curData->id = id;
-  curData->name = (char*) malloc(strlen(name) + 1);
-  strcpy((char*) curData->name, name);
+  if (nameAsData) {
+    curData->name = (unsigned char*) malloc(nameLength);
+    memcpy(curData->name, name, nameLength);
+  }
+  else {
+    curData->name = (char*) malloc(strlen(name) + 1);
+    strcpy((char*) curData->name, name);
+  }
   curData->data = (unsigned char*) malloc(dataLength);
   memcpy(curData->data, data, dataLength);
   
@@ -854,8 +937,8 @@ ResourceKey* insertData(ResourceKey* resources, const char* key, int id, const c
   }
 }
 
-ResourceKey* makePlst() {
-  return insertData(NULL, "plst", 0, "", plstData, sizeof(plstData), ATTRIBUTE_HDIUTIL); 
+ResourceKey* makePlst(const char* name, size_t nameLength, bool nameAsData) {
+  return insertData(NULL, "plst", 0, name, nameLength, nameAsData, plstData, sizeof(plstData), ATTRIBUTE_HDIUTIL);
 }
 
 ResourceKey* makeSize(HFSPlusVolumeHeader* volumeHeader) {
@@ -872,6 +955,6 @@ ResourceKey* makeSize(HFSPlusVolumeHeader* volumeHeader) {
   size.sizePresent = 1;
 
   printf("making size data\n");  
-  return insertData(NULL, "size", 2, "", (const char*)(&size), sizeof(SizeResource), 0); 
+  return insertData(NULL, "size", 2, "", 0, false, (const char*)(&size), sizeof(SizeResource), 0);
 }
 

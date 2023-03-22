@@ -23,7 +23,7 @@
 
 BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorNumber, uint32_t numSectors, uint32_t blocksDescriptor,
 			uint32_t checksumType, ChecksumFunc uncompressedChk, void* uncompressedChkToken, ChecksumFunc compressedChk,
-			void* compressedChkToken, Volume* volume, int addComment) {
+			void* compressedChkToken, Volume* volume, int addComment, AbstractAttribution* attribution) {
 	BLKXTable* blkx;
 
 	uint32_t roomForRuns;
@@ -71,6 +71,11 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 	curSector = 0;
 
 	uint64_t startOff = in->tell(in);
+
+	// We never want the iOS-specific tweaks when building attributable DMGs.
+	if (attribution) {
+		ASSERT(!addComment, "No attribution with addComment!");
+	}
 
 	if(addComment)
 	{
@@ -202,6 +207,13 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 		strm.avail_in = amountRead;
 		strm.next_in = (char*)inBuffer;
 
+		bool keepRaw = FALSE;
+		if (attribution) {
+			// TODO: what about when sectors align badly?
+			keepRaw = attribution->shouldKeepRaw(attribution, inBuffer, amountRead);
+			printf("keepRaw = %d (%p, %d)\n", keepRaw, inBuffer, amountRead);
+		}
+
 		if(uncompressedChk)
 			(*uncompressedChk)(uncompressedChkToken, inBuffer, blkx->runs[curRun].sectorCount * SECTOR_SIZE);
 
@@ -217,7 +229,8 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 		}
 		have = bufferSize - strm.avail_out;
 
-		if((have / SECTOR_SIZE) >= (blkx->runs[curRun].sectorCount - 15)) {
+		if(keepRaw || ((have / SECTOR_SIZE) >= (blkx->runs[curRun].sectorCount - 15))) {
+			printf("Setting type = BLOCK_RAW\n");
 			blkx->runs[curRun].type = BLOCK_RAW;
 			ASSERT(out->write(out, inBuffer, blkx->runs[curRun].sectorCount * SECTOR_SIZE) == (blkx->runs[curRun].sectorCount * SECTOR_SIZE), "fwrite");
 			blkx->runs[curRun].compLength += blkx->runs[curRun].sectorCount * SECTOR_SIZE;
@@ -225,11 +238,24 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 			if(compressedChk)
 				(*compressedChk)(compressedChkToken, inBuffer, blkx->runs[curRun].sectorCount * SECTOR_SIZE);
 
+			if (attribution) {
+				// In a raw block, uncompressed and compressed data is identical.
+				attribution->observeBuffers(attribution, keepRaw,
+											inBuffer, blkx->runs[curRun].sectorCount * SECTOR_SIZE,
+											inBuffer, blkx->runs[curRun].sectorCount * SECTOR_SIZE);
+			}
 		} else {
 			ASSERT(out->write(out, outBuffer, have) == have, "fwrite");
 
 			if(compressedChk)
 				(*compressedChk)(compressedChkToken, outBuffer, have);
+
+			if (attribution) {
+				// In a bzip2 block, uncompressed and compressed data are not the same.
+				attribution->observeBuffers(attribution, keepRaw,
+											inBuffer, amountRead,
+											outBuffer, have);
+			}
 
 			blkx->runs[curRun].compLength += have;
 		}

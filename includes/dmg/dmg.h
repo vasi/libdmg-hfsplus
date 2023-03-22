@@ -7,6 +7,7 @@
 
 #include <hfs/hfsplus.h>
 #include "abstractfile.h"
+#include "attribution.h"
 #include "common.h"
 
 #define CHECKSUM_UDIF_CRC32 0x00000002
@@ -48,6 +49,10 @@
 
 #define BOOTCODE_DMMY 0x444D4D59
 #define BOOTCODE_GOON 0x676F6F6E
+
+#define bool short
+#define true 1
+#define false 0
 
 enum {
 	kUDIFFlagsFlattened = 1
@@ -292,8 +297,8 @@ extern "C" {
 	void readUDIFResourceFile(AbstractFile* file, UDIFResourceFile* o);
 	void writeUDIFResourceFile(AbstractFile* file, UDIFResourceFile* o);
 
-	ResourceKey* readResources(char* xml, size_t length);
-	void writeResources(AbstractFile* file, ResourceKey* resources);
+	ResourceKey* readResources(char* xml, size_t length, bool plstNameIsAttribution);
+	void writeResources(AbstractFile* file, ResourceKey* resources, bool plstNameIsAttribution);
 	void releaseResources(ResourceKey* resources);
 
 	NSizResource* readNSiz(ResourceKey* resources);
@@ -305,8 +310,8 @@ extern "C" {
 
 	ResourceKey* getResourceByKey(ResourceKey* resources, const char* key);
 	ResourceData* getDataByID(ResourceKey* resource, int id);
-	ResourceKey* insertData(ResourceKey* resources, const char* key, int id, const char* name, const char* data, size_t dataLength, uint32_t attributes);
-	ResourceKey* makePlst();
+	ResourceKey* insertData(ResourceKey* resources, const char* key, int id, const char* name, size_t nameLength, bool nameAsData, const char* data, size_t dataLength, uint32_t attributes);
+	ResourceKey* makePlst(const char* name, size_t nameLength, bool nameAsData);
 	ResourceKey* makeSize(HFSPlusVolumeHeader* volumeHeader);
 
 	void flipDriverDescriptorRecord(DriverDescriptorRecord* record, char out);
@@ -325,11 +330,11 @@ extern "C" {
 	void extractBLKX(AbstractFile* in, AbstractFile* out, BLKXTable* blkx);
 	BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorNumber, uint32_t numSectors, uint32_t blocksDescriptor,
 	            uint32_t checksumType, ChecksumFunc uncompressedChk, void* uncompressedChkToken, ChecksumFunc compressedChk,
-	            void* compressedChkToken, Volume* volume, int addComment);
+				void* compressedChkToken, Volume* volume, int addComment, AbstractAttribution* attribution);
 
 
 	int extractDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, int partNum);
-	int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, unsigned int BlockSize);
+	int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, unsigned int BlockSize, const char* sentinel);
 	int convertToISO(AbstractFile* abstractIn, AbstractFile* abstractOut);
 	int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut);
 #ifdef __cplusplus
