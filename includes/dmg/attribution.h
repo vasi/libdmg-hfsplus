@@ -78,8 +78,15 @@ typedef struct AttributionResource {
 
 typedef struct AbstractAttribution AbstractAttribution;
 
+enum ShouldKeepRaw {
+  KeepNoneRaw,
+  KeepCurrentRaw,
+  KeepCurrentAndNextRaw,
+  KeepRemainingRaw,
+};
+
 typedef void (*BeforeMainBlkxFunc)(AbstractAttribution* attribution, AbstractFile* abstractOut, ChecksumToken* dataForkToken);
-typedef int (*ShouldKeepRawFunc)(AbstractAttribution* attribution, const void* data, size_t len);
+typedef enum ShouldKeepRaw (*ShouldKeepRawFunc)(AbstractAttribution* attribution, const void* data, size_t len, const void* nextData, size_t nextLen);
 typedef void (*ObserveBuffersFunc)(AbstractAttribution* attribution, int didKeepRaw, const void* uncompressedData, size_t uncompressedLen, const void* compressedData, size_t compressedLen);
 typedef void (*AfterMainBlkxFunc)(AbstractAttribution* attribution, AbstractFile* abstractOut, ChecksumToken* dataForkToken, AttributionResource* attributionResource);
 

@@ -42,10 +42,23 @@ FindStrInBuf(char const * buf, size_t bufLen, char const * str)
   return NULL;
 }
 
-int sentinelShouldKeepRaw(AbstractAttribution* attribution, const void* data, size_t len) {
+enum ShouldKeepRaw sentinelShouldKeepRaw(AbstractAttribution* attribution, const void* data, size_t len, const void* nextData, size_t nextLen) {
 	AttributionPreservingSentinelData* attributionData = (AttributionPreservingSentinelData*)attribution->data;
-	/* return FALSE; */
-	return NULL != FindStrInBuf((char const*)data, len, (const char*)attributionData->sentinel);
+	if (NULL != FindStrInBuf((char const*)data, len, (const char*)attributionData->sentinel)) {
+	  return KeepCurrentRaw;
+	}
+
+	// If we didn't find it in the data, check if it spans data + nextData
+	if (nextLen > 0) {
+	  char* combinedData = malloc(len + nextLen);
+	  memcpy(combinedData, data, len);
+	  memcpy(combinedData + len, nextData, nextLen);
+	  if (NULL != FindStrInBuf((char const*)combinedData, len + nextLen, (const char*)attributionData->sentinel)) {
+	    return KeepCurrentAndNextRaw;
+	  }
+	}
+
+	return KeepNoneRaw;
 }
 
 void sentinelBeforeMainBlkx(AbstractAttribution* attribution, AbstractFile* abstractOut, ChecksumToken* dataForkToken) {
@@ -58,31 +71,39 @@ void sentinelBeforeMainBlkx(AbstractAttribution* attribution, AbstractFile* abst
 void sentinelObserveBuffers(AbstractAttribution* attribution, int didKeepRaw, const void* uncompressedData, size_t uncompressedLen, const void* compressedData, size_t compressedLen) {
 	AttributionPreservingSentinelData* attributionData = (AttributionPreservingSentinelData*)attribution->data;
 
-	if (didKeepRaw) {
-		ASSERT(attributionData->raw_UncompressedLength == -1, "Only one raw block supported!");
-		ASSERT(attributionData->raw_CompressedLength == -1, "Only one raw block supported!");
+	if (didKeepRaw == KeepCurrentRaw || didKeepRaw == KeepCurrentAndNextRaw) {
+		// If this is our first time in, we need to set up `raw_*` and `afterRaw*`
+		// from scratch.
+		if (attributionData->afterRaw_UncompressedLength < 0) {
+		  // Just in case.
+		  memset(&attributionData->raw_UncompressedChkToken, 0, sizeof(ChecksumToken));
+		  memset(&attributionData->raw_CompressedChkToken, 0, sizeof(ChecksumToken));
 
-		// Just in case.
-		memset(&attributionData->raw_UncompressedChkToken, 0, sizeof(ChecksumToken));
-		memset(&attributionData->raw_CompressedChkToken, 0, sizeof(ChecksumToken));
+		  CRCProxy(&attributionData->raw_UncompressedChkToken, uncompressedData, uncompressedLen);
+		  attributionData->raw_UncompressedLength = uncompressedLen;
+		  printf("Adding to raw_UncompressedChkToken, now CRC32: %x, length: %llx\n", attributionData->raw_UncompressedChkToken.crc, attributionData->raw_UncompressedLength);
 
-		CRCProxy(&attributionData->raw_UncompressedChkToken, uncompressedData, uncompressedLen);
-		attributionData->raw_UncompressedLength = uncompressedLen;
-		printf("Adding to raw_UncompressedChkToken, now CRC32: %x, length: %llx\n", attributionData->raw_UncompressedChkToken.crc, attributionData->raw_UncompressedLength);
+		  // Of course, the compressed data *should* be the uncompressed data.
+		  CRCProxy(&attributionData->raw_CompressedChkToken, compressedData, compressedLen);
+		  attributionData->raw_CompressedLength = compressedLen;
+		  printf("Adding to raw_CompressedChkToken, now CRC32: %x, length: %llx\n", attributionData->raw_CompressedChkToken.crc, attributionData->raw_CompressedLength);
 
-		// Of course, the compressed data *should* be the uncompressed data.
-		CRCProxy(&attributionData->raw_CompressedChkToken, compressedData, compressedLen);
-		attributionData->raw_CompressedLength = compressedLen;
-		printf("Adding to raw_CompressedChkToken, now CRC32: %x, length: %llx\n", attributionData->raw_CompressedChkToken.crc, attributionData->raw_CompressedLength);
+		  attributionData->afterRaw_UncompressedLength = 0;
+		  attributionData->afterRaw_CompressedLength = 0;
+		  // Just in case.
+		  memset(&attributionData->afterRaw_UncompressedChkToken, 0, sizeof(ChecksumToken));
+		  memset(&attributionData->afterRaw_CompressedChkToken, 0, sizeof(ChecksumToken));
+		}
+		// If this is our second time through, we just need to update the `raw*` values.
+		else {
+		  CRCProxy(&attributionData->raw_UncompressedChkToken, uncompressedData, uncompressedLen);
+		  attributionData->raw_UncompressedLength += uncompressedLen;
+		  printf("Appending to raw_UncompressedChkToken, now CRC32: %x, length: %llx\n", attributionData->raw_UncompressedChkToken.crc, attributionData->raw_UncompressedLength);
 
-		ASSERT(attributionData->afterRaw_UncompressedLength == -1, "Only one raw block supported!");
-		ASSERT(attributionData->afterRaw_CompressedLength == -1, "Only one raw block supported!");
-
-		attributionData->afterRaw_UncompressedLength = 0;
-		attributionData->afterRaw_CompressedLength = 0;
-		// Just in case.
-		memset(&attributionData->afterRaw_UncompressedChkToken, 0, sizeof(ChecksumToken));
-		memset(&attributionData->afterRaw_CompressedChkToken, 0, sizeof(ChecksumToken));
+		  CRCProxy(&attributionData->raw_CompressedChkToken, compressedData, compressedLen);
+		  attributionData->raw_CompressedLength += compressedLen;
+		  printf("Appending to raw_CompressedChkToken, now CRC32: %x, length: %llx\n", attributionData->raw_CompressedChkToken.crc, attributionData->raw_CompressedLength);
+		}
 	} else {
 		if (attributionData->afterRaw_UncompressedLength < 0) {
 			CRCProxy(&attributionData->beforeRaw_UncompressedChkToken, uncompressedData, uncompressedLen);
