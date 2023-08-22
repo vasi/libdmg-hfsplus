@@ -274,6 +274,12 @@ int updateAttribution(AbstractFile* abstractIn, AbstractFile* abstractOut, const
   printf("anchorOffset: 0x%llx\n", anchorOffset);
 
   ASSERT(rawAnchor + dataLen <= rawBuffer + attributionResource->rawLength, "data too long!");
+  // Zero out the anchor area, in case the data is shorter than the anchor
+  // Note that we're taking the strlen of `rawAnchor` and not the `anchor`
+  // passed in. This ensures that the entire anchor is zero'ed, even if only
+  // a prefix of it was provided.
+  memset((void *)rawAnchor, 0, strlen(rawAnchor));
+  // Copy the new data into the same spot the anchor was in
   memcpy((void *)rawAnchor, data, dataLen);
 
   // Write the new block.
