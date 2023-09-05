@@ -107,8 +107,8 @@ int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, unsigned int B
 	
 	ChecksumToken dataForkToken;
 	
-	UDIFResourceFile koly;
-	
+	UDIFResourceFile koly = {0};
+
 	off_t plistOffset;
 	uint32_t plistSize;
 	uint32_t dataForkChecksum;
@@ -294,8 +294,8 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut) {
 	uint32_t dataForkChecksum;
 	uint64_t numSectors;
 	
-	UDIFResourceFile koly;
-	
+	UDIFResourceFile koly = {0};
+
 	char partitionName[512];
 	
 	off_t fileLength;
