@@ -106,4 +106,18 @@ unsigned char* decodeBase64(char* toDecode, size_t* dataLength);
 void writeBase64(struct AbstractFile* file, unsigned char* data, size_t dataLength, int tabLength, int width);
 char* convertBase64(unsigned char* data, size_t dataLength, int tabLength, int width);
 
+#define SHA1_DIGEST_SIZE 20
+
+typedef struct {
+	uint32_t state[5];
+	uint32_t count[2];
+	uint8_t  buffer[64];
+} SHA1_CTX;
+
+typedef struct {
+	uint32_t block;
+	uint32_t crc;
+	SHA1_CTX sha1;
+} ChecksumToken;
+
 #endif

@@ -6,6 +6,7 @@
 
 #include <dmg/dmg.h>
 #include <dmg/adc.h>
+#include <dmg/attribution.h>
 #include <inttypes.h>
 
 #define SECTORS_AT_A_TIME 0x200
@@ -23,7 +24,7 @@
 
 BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorNumber, uint32_t numSectors, uint32_t blocksDescriptor,
 			uint32_t checksumType, ChecksumFunc uncompressedChk, void* uncompressedChkToken, ChecksumFunc compressedChk,
-			void* compressedChkToken, Volume* volume, int addComment) {
+			void* compressedChkToken, Volume* volume, int addComment, AbstractAttribution* attribution) {
 	BLKXTable* blkx;
 
 	uint32_t roomForRuns;
@@ -31,6 +32,7 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 	uint64_t curSector;
 
 	unsigned char* inBuffer;
+	unsigned char* nextInBuffer;
 	unsigned char* outBuffer;
 	size_t bufferSize;
 	size_t have;
@@ -65,12 +67,19 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 	bufferSize = SECTOR_SIZE * blkx->decompressBufferRequested;
 
 	ASSERT(inBuffer = (unsigned char*) malloc(bufferSize), "malloc");
+	ASSERT(nextInBuffer = (unsigned char*) malloc(bufferSize), "malloc");
 	ASSERT(outBuffer = (unsigned char*) malloc(bufferSize), "malloc");
 
 	curRun = 0;
 	curSector = 0;
 
 	uint64_t startOff = in->tell(in);
+
+	enum ShouldKeepRaw keepRaw = KeepNoneRaw;
+	// We never want the iOS-specific tweaks when building attributable DMGs.
+	if (attribution) {
+		ASSERT(!addComment, "No attribution with addComment!");
+	}
 
 	if(addComment)
 	{
@@ -93,7 +102,6 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 			roomForRuns <<= 1;
 			blkx = (BLKXTable*) realloc(blkx, sizeof(BLKXTable) + (roomForRuns * sizeof(BLKXRun)));
 		}
-
 		blkx->runs[curRun].type = BLOCK_BZIP2;
 		blkx->runs[curRun].reserved = 0;
 		blkx->runs[curRun].sectorStart = curSector;
@@ -104,7 +112,8 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 		strm.bzfree = Z_NULL;
 		strm.opaque = Z_NULL;
 
-		int amountRead;
+		int amountRead = 0;
+		int nextAmountRead = 0;
 		{
 			size_t sectorsToSkip = 0;
 			size_t processed = 0;
@@ -114,8 +123,15 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 				blkx->runs[curRun].sectorCount = ((numSectors - processed) > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : (numSectors - processed);
 
 				//printf("Currently at %" PRId64 "\n", curOff);
-				in->seek(in, startOff + (blkx->sectorCount - numSectors + processed) * SECTOR_SIZE);
+				off_t sectorStart = startOff + (blkx->sectorCount - numSectors + processed) * SECTOR_SIZE;
+				in->seek(in, sectorStart);
 				ASSERT((amountRead = in->read(in, inBuffer, blkx->runs[curRun].sectorCount * SECTOR_SIZE)) == (blkx->runs[curRun].sectorCount * SECTOR_SIZE), "mRead");
+
+				if (numSectors - blkx->runs[curRun].sectorCount > 0) {
+					// No need to rewind `inBuffer` because the next iteration of the loop
+					// calls `seek` anyways.
+					nextAmountRead = in->read(in, nextInBuffer, blkx->runs[curRun].sectorCount * SECTOR_SIZE);
+				}
 
 				if(!addComment)
 					break;
@@ -202,6 +218,27 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 		strm.avail_in = amountRead;
 		strm.next_in = (char*)inBuffer;
 
+		if (attribution) {
+			// We either haven't found the sentinel value yet, or are already past it.
+			// Either way, keep searching.
+			if (keepRaw == KeepNoneRaw) {
+				keepRaw = attribution->shouldKeepRaw(attribution, inBuffer, amountRead, nextInBuffer, nextAmountRead);
+			}
+			// KeepCurrentAndNextRaw means that the *previous* time through the loop `shouldKeepRaw`
+			// found the sentinel string, and that it crosses two runs. The previous
+			// loop already kept its run raw, and so must we. We don't want the _next_ run 
+			// to also be raw though, so we adjust this appropriately.
+			// Note that KeepCurrentRaw will switch to KeepNoneRaw further down, when we've
+			// set the run raw.
+			else if (keepRaw == KeepCurrentAndNextRaw) {
+				keepRaw = KeepCurrentRaw;
+			}
+			else if (keepRaw == KeepCurrentRaw) {
+				keepRaw = KeepRemainingRaw;
+			}
+			printf("keepRaw = %d (%p, %d)\n", keepRaw, inBuffer, amountRead);
+		}
+
 		if(uncompressedChk)
 			(*uncompressedChk)(uncompressedChkToken, inBuffer, blkx->runs[curRun].sectorCount * SECTOR_SIZE);
 
@@ -217,19 +254,34 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 		}
 		have = bufferSize - strm.avail_out;
 
-		if((have / SECTOR_SIZE) >= (blkx->runs[curRun].sectorCount - 15)) {
+		if(keepRaw == KeepCurrentRaw || keepRaw == KeepCurrentAndNextRaw || ((have / SECTOR_SIZE) >= (blkx->runs[curRun].sectorCount - 15))) {
+			printf("Setting type = BLOCK_RAW\n");
 			blkx->runs[curRun].type = BLOCK_RAW;
 			ASSERT(out->write(out, inBuffer, blkx->runs[curRun].sectorCount * SECTOR_SIZE) == (blkx->runs[curRun].sectorCount * SECTOR_SIZE), "fwrite");
 			blkx->runs[curRun].compLength += blkx->runs[curRun].sectorCount * SECTOR_SIZE;
 
+
 			if(compressedChk)
 				(*compressedChk)(compressedChkToken, inBuffer, blkx->runs[curRun].sectorCount * SECTOR_SIZE);
 
+			if (attribution) {
+				// In a raw block, uncompressed and compressed data is identical.
+				attribution->observeBuffers(attribution, keepRaw,
+											inBuffer, blkx->runs[curRun].sectorCount * SECTOR_SIZE,
+											inBuffer, blkx->runs[curRun].sectorCount * SECTOR_SIZE);
+			}
 		} else {
 			ASSERT(out->write(out, outBuffer, have) == have, "fwrite");
 
 			if(compressedChk)
 				(*compressedChk)(compressedChkToken, outBuffer, have);
+
+			if (attribution) {
+				// In a bzip2 block, uncompressed and compressed data are not the same.
+				attribution->observeBuffers(attribution, keepRaw,
+											inBuffer, amountRead,
+											outBuffer, have);
+			}
 
 			blkx->runs[curRun].compLength += have;
 		}

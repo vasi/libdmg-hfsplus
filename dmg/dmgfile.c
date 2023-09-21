@@ -209,7 +209,7 @@ io_func* openDmgFile(AbstractFile* abstractIn) {
     ASSERT( abstractIn->read(abstractIn, dmg->resourceXML, (size_t)dmg->resourceFile.fUDIFXMLLength) == (size_t)dmg->resourceFile.fUDIFXMLLength, "fread" );
     dmg->resourceXML[dmg->resourceFile.fUDIFXMLLength] = 0;
     
-	dmg->resources = readResources(dmg->resourceXML, dmg->resourceFile.fUDIFXMLLength);
+	dmg->resources = readResources(dmg->resourceXML, dmg->resourceFile.fUDIFXMLLength, true);
 	dmg->numBLKX = 0;
 
 	blkx = (getResourceByKey(dmg->resources, "blkx"))->data;

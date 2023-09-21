@@ -73,4 +73,3 @@ The makefile in the root folder will make all utilities.
 ### hdutil
 	cd hdiutil
 	make
-
