@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <zlib.h>
 
 #include <dmg/dmg.h>
 
@@ -493,7 +494,7 @@ DriverDescriptorRecord* createDriverDescriptorMap(uint32_t numSectors) {
 }
 
 void writeDriverDescriptorMap(AbstractFile* file, DriverDescriptorRecord* DDM, ChecksumFunc dataForkChecksum, void* dataForkToken,
-				ResourceKey **resources) {
+				ResourceKey **resources, int zlibLevel) {
   AbstractFile* bufferFile;
   BLKXTable* blkx;
   ChecksumToken uncompressedToken;
@@ -508,7 +509,7 @@ void writeDriverDescriptorMap(AbstractFile* file, DriverDescriptorRecord* DDM, C
   bufferFile = createAbstractFileFromMemory((void**)&buffer, DDM_SIZE * SECTOR_SIZE);
 
   blkx = insertBLKX(file, bufferFile, DDM_OFFSET, DDM_SIZE, DDM_DESCRIPTOR, CHECKSUM_CRC32, &CRCProxy, &uncompressedToken,
-			dataForkChecksum, dataForkToken, NULL);
+			dataForkChecksum, dataForkToken, NULL, zlibLevel);
 
   blkx->checksum.data[0] = uncompressedToken.crc;
 
@@ -519,7 +520,7 @@ void writeDriverDescriptorMap(AbstractFile* file, DriverDescriptorRecord* DDM, C
   free(blkx);
 }
 
-void writeApplePartitionMap(AbstractFile* file, Partition* partitions, ChecksumFunc dataForkChecksum, void* dataForkToken, ResourceKey **resources, NSizResource** nsizIn) {
+void writeApplePartitionMap(AbstractFile* file, Partition* partitions, ChecksumFunc dataForkChecksum, void* dataForkToken, ResourceKey **resources, NSizResource** nsizIn, int zlibLevel) {
   AbstractFile* bufferFile;
   BLKXTable* blkx;
   ChecksumToken uncompressedToken;
@@ -536,7 +537,7 @@ void writeApplePartitionMap(AbstractFile* file, Partition* partitions, ChecksumF
   bufferFile = createAbstractFileFromMemory((void**)&buffer, PARTITION_SIZE * SECTOR_SIZE);
 
   blkx = insertBLKX(file, bufferFile, PARTITION_OFFSET, PARTITION_SIZE, 0, CHECKSUM_CRC32,
-              &BlockCRC, &uncompressedToken, dataForkChecksum, dataForkToken, NULL);
+              &BlockCRC, &uncompressedToken, dataForkChecksum, dataForkToken, NULL, zlibLevel);
 
   bufferFile->close(bufferFile);
 
@@ -568,7 +569,7 @@ void writeApplePartitionMap(AbstractFile* file, Partition* partitions, ChecksumF
   free(blkx);
 }
 
-void writeATAPI(AbstractFile* file, ChecksumFunc dataForkChecksum, void* dataForkToken, ResourceKey **resources, NSizResource** nsizIn) {
+void writeATAPI(AbstractFile* file, ChecksumFunc dataForkChecksum, void* dataForkToken, ResourceKey **resources, NSizResource** nsizIn, int zlibLevel) {
   AbstractFile* bufferFile;
   BLKXTable* blkx;
   ChecksumToken uncompressedToken;
@@ -584,7 +585,7 @@ void writeATAPI(AbstractFile* file, ChecksumFunc dataForkChecksum, void* dataFor
   bufferFile = createAbstractFileFromMemory((void**)&atapi, ATAPI_SIZE * SECTOR_SIZE);
 
   blkx = insertBLKX(file, bufferFile, ATAPI_OFFSET, ATAPI_SIZE, 1, CHECKSUM_CRC32,
-              &BlockCRC, &uncompressedToken, dataForkChecksum, dataForkToken, NULL);
+              &BlockCRC, &uncompressedToken, dataForkChecksum, dataForkToken, NULL, zlibLevel);
 
   bufferFile->close(bufferFile);
   free(atapi);

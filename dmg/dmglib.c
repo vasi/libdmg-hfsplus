@@ -2,6 +2,7 @@
 #include "common.h"
 #include "abstractfile.h"
 #include <dmg/dmg.h>
+#include <zlib.h>
 
 uint32_t calculateMasterChecksum(ResourceKey* resources);
 
@@ -85,7 +86,7 @@ uint32_t calculateMasterChecksum(ResourceKey* resources) {
 	return result;
 }
 
-int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut) {
+int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, int zlibLevel) {
 	io_func* io;
 	Volume* volume;
 
@@ -133,11 +134,11 @@ int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut) {
 
 	partitions = createApplePartitionMap((volumeHeader->totalBlocks * volumeHeader->blockSize)/SECTOR_SIZE, HFSX_VOLUME_TYPE);
 
-	writeDriverDescriptorMap(abstractOut, DDM, &CRCProxy, (void*) (&dataForkToken), &resources);
+	writeDriverDescriptorMap(abstractOut, DDM, &CRCProxy, (void*) (&dataForkToken), &resources, zlibLevel);
 	free(DDM);
-	writeApplePartitionMap(abstractOut, partitions, &CRCProxy, (void*) (&dataForkToken), &resources, &nsiz);
+	writeApplePartitionMap(abstractOut, partitions, &CRCProxy, (void*) (&dataForkToken), &resources, &nsiz, zlibLevel);
 	free(partitions);
-	writeATAPI(abstractOut, &CRCProxy, (void*) (&dataForkToken), &resources, &nsiz);
+	writeATAPI(abstractOut, &CRCProxy, (void*) (&dataForkToken), &resources, &nsiz, zlibLevel);
 
 	memset(&uncompressedToken, 0, sizeof(uncompressedToken));
 	SHA1Init(&(uncompressedToken.sha1));
@@ -146,7 +147,7 @@ int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut) {
 
 	abstractIn->seek(abstractIn, 0);
 	blkx = insertBLKX(abstractOut, abstractIn, USER_OFFSET, (volumeHeader->totalBlocks * volumeHeader->blockSize)/SECTOR_SIZE,
-				2, CHECKSUM_CRC32, &BlockSHA1CRC, &uncompressedToken, &CRCProxy, &dataForkToken, volume);
+				2, CHECKSUM_CRC32, &BlockSHA1CRC, &uncompressedToken, &CRCProxy, &dataForkToken, volume, zlibLevel);
 
 	blkx->checksum.data[0] = uncompressedToken.crc;
 	printf("Inserting main blkx...\n"); fflush(stdout);
@@ -262,7 +263,7 @@ int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut) {
 	return TRUE;
 }
 
-int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut) {
+int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut, int zlibLevel) {
 	Partition* partitions;
 	DriverDescriptorRecord* DDM;
 	int i;
@@ -311,7 +312,7 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut) {
 
 	if(DDM->sbSig == DRIVER_DESCRIPTOR_SIGNATURE) {
 		BlockSize = DDM->sbBlkSize;
-		writeDriverDescriptorMap(abstractOut, DDM, &CRCProxy, (void*) (&dataForkToken), &resources);
+		writeDriverDescriptorMap(abstractOut, DDM, &CRCProxy, (void*) (&dataForkToken), &resources, zlibLevel);
 		free(DDM);
 
 		printf("Processing partition map...\n"); fflush(stdout);
@@ -342,7 +343,7 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut) {
 
 			abstractIn->seek(abstractIn, partitions[i].pmPyPartStart * BlockSize);
 			blkx = insertBLKX(abstractOut, abstractIn, partitions[i].pmPyPartStart, partitions[i].pmPartBlkCnt, i, CHECKSUM_CRC32,
-						&BlockCRC, &uncompressedToken, &CRCProxy, &dataForkToken, NULL);
+						&BlockCRC, &uncompressedToken, &CRCProxy, &dataForkToken, NULL, zlibLevel);
 
 			blkx->checksum.data[0] = uncompressedToken.crc;
 			resources = insertData(resources, "blkx", i, partitionName, (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
@@ -384,7 +385,7 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut) {
 
 		abstractIn->seek(abstractIn, 0);
 		blkx = insertBLKX(abstractOut, abstractIn, 0, numSectors, ENTIRE_DEVICE_DESCRIPTOR, CHECKSUM_CRC32,
-					&BlockCRC, &uncompressedToken, &CRCProxy, &dataForkToken, NULL);
+					&BlockCRC, &uncompressedToken, &CRCProxy, &dataForkToken, NULL, zlibLevel);
 		blkx->checksum.data[0] = uncompressedToken.crc;
 		resources = insertData(resources, "blkx", 0, "whole disk (unknown partition : 0)", (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
 		free(blkx);
