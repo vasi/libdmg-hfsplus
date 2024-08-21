@@ -22,11 +22,9 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 	unsigned char* inBuffer;
 	unsigned char* outBuffer;
 	size_t bufferSize;
+	size_t inSize;
 	size_t have;
 	int ret;
-
-	z_stream strm;
-
 
 	blkx = (BLKXTable*) malloc(sizeof(BLKXTable) + (2 * sizeof(BLKXRun)));
 	roomForRuns = 2;
@@ -64,22 +62,14 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 			blkx = (BLKXTable*) realloc(blkx, sizeof(BLKXTable) + (roomForRuns * sizeof(BLKXRun)));
 		}
 
-		blkx->runs[curRun].type = BLOCK_ZLIB;
+		blkx->runs[curRun].type = BLOCK_LZFSE;
 		blkx->runs[curRun].reserved = 0;
 		blkx->runs[curRun].sectorStart = curSector;
 		blkx->runs[curRun].sectorCount = (numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : numSectors;
 
-		memset(&strm, 0, sizeof(strm));
-		strm.zalloc = Z_NULL;
-		strm.zfree = Z_NULL;
-		strm.opaque = Z_NULL;
-
 		printf("run %d: sectors=%" PRId64 ", left=%d\n", curRun, blkx->runs[curRun].sectorCount, numSectors);
 
-		ASSERT(deflateInit(&strm, zlibLevel) == Z_OK, "deflateInit");
-
-		ASSERT((strm.avail_in = in->read(in, inBuffer, blkx->runs[curRun].sectorCount * SECTOR_SIZE)) == (blkx->runs[curRun].sectorCount * SECTOR_SIZE), "mRead");
-		strm.next_in = inBuffer;
+		ASSERT((inSize = in->read(in, inBuffer, blkx->runs[curRun].sectorCount * SECTOR_SIZE)) == (blkx->runs[curRun].sectorCount * SECTOR_SIZE), "mRead");
 
 		if(uncompressedChk)
 			(*uncompressedChk)(uncompressedChkToken, inBuffer, blkx->runs[curRun].sectorCount * SECTOR_SIZE);
@@ -87,14 +77,8 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 		blkx->runs[curRun].compOffset = out->tell(out) - blkx->dataStart;
 		blkx->runs[curRun].compLength = 0;
 
-		strm.avail_out = bufferSize;
-		strm.next_out = outBuffer;
-
-		ASSERT((ret = deflate(&strm, Z_FINISH)) != Z_STREAM_ERROR, "deflate/Z_STREAM_ERROR");
-		if(ret != Z_STREAM_END) {
-			ASSERT(FALSE, "deflate");
-		}
-		have = bufferSize - strm.avail_out;
+		have = lzfse_encode_buffer(outBuffer, bufferSize, inBuffer, inSize, NULL);
+		ASSERT(have > 0, "compression error");
 
 		if((have / SECTOR_SIZE) > blkx->runs[curRun].sectorCount) {
 			blkx->runs[curRun].type = BLOCK_RAW;
@@ -112,8 +96,6 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 
 			blkx->runs[curRun].compLength += have;
 		}
-
-		deflateEnd(&strm);
 
 		curSector += blkx->runs[curRun].sectorCount;
 		numSectors -= blkx->runs[curRun].sectorCount;
