@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <zlib.h>
+#include <lzfse.h>
 
 #include <dmg/dmg.h>
 #include <dmg/adc.h>

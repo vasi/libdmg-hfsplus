@@ -15,6 +15,10 @@ ENDIF()
 
 include_directories(${ZLIB_INCLUDE_DIR})
 
+find_library(LZFSE_LIBRARY NAMES lzfse REQUIRED)
+find_path(LZFSE_INCLUDE_DIR NAMES lzfse.h REQUIRED)
+include_directories(${LZFSE_INCLUDE_DIR})
+
 link_directories(${PROJECT_BINARY_DIR}/common ${PROJECT_BINARY_DIR}/hfs)
 
 add_library(dmg adc.c base64.c checksum.c dmgfile.c dmglib.c filevault.c io.c partition.c resources.c udif.c)
@@ -31,6 +35,7 @@ ELSEIF(OPENSSL_FOUND)
 ENDIF()
 
 target_link_libraries(dmg common hfs ${ZLIB_LIBRARIES})
+target_link_libraries(dmg ${LZFSE_LIBRARY})
 
 add_executable(dmg-bin dmg.c)
 target_link_libraries(dmg-bin dmg)
