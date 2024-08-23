@@ -43,7 +43,6 @@ typedef struct {
 
 	uint32_t nextIdx;
 	block* pendingBlocks;
-	block* freeBlocks;
 } outData;
 
 typedef struct {
@@ -125,10 +124,6 @@ static void writeBlock(outData* o, block *outb) {
 
 	if(o->compressedChk)
 		(*o->compressedChk)(o->compressedChkToken, outb->buf, outb->bufsize);
-
-	/* put onto free list */
-	outb->next = o->freeBlocks;
-	o->freeBlocks = outb;
 }
 
 static void addBlockPending(outData* o, block *outb) {
@@ -139,46 +134,27 @@ static void addBlockPending(outData* o, block *outb) {
 	*b = outb;
 }
 
-static block* writeBlocks(size_t bufferSize, outData* o) {
+static void writeBlocks(outData* o) {
 	block* b;
 	block* next;
 	for (b = o->pendingBlocks; b && b->idx == o->nextIdx; b = next) {
 		next = b->next;
 		writeBlock(o, b);
+		freeBlock(b);
 		++o->nextIdx;
 	}
 	o->pendingBlocks = b;
-
-	/* return a free block */
-	if (o->freeBlocks) {
-		b = o->freeBlocks;
-		o->freeBlocks = b->next;
-	} else {
-		b = allocBlock(bufferSize);
-	}
-	return b;
 }
 
-static block* finishBlock(size_t bufferSize, outData* o, block *outb) {
+static void finishBlock(size_t bufferSize, outData* o, block *outb) {
 	block* b;
 
 	ASSERT(pthread_mutex_lock(&o->mut) == 0, "mutex lock");
 
 	addBlockPending(o, outb);
-	b = writeBlocks(bufferSize, o);
+	writeBlocks(o);
 
 	ASSERT(pthread_mutex_unlock(&o->mut) == 0, "mutex unlock");
-	return b;
-}
-
-static void releaseFree(outData* o) {
-	block* b;
-	block* next;
-	for (b = o->freeBlocks; b; b = next) {
-		next = b->next;
-		freeBlock(b);
-	}
-	o->freeBlocks = NULL;
 }
 
 static void* threadWorker(void* arg) {
@@ -194,7 +170,8 @@ static void* threadWorker(void* arg) {
 			break;
 
 		compressBlock(d->bufferSize, inb, outb);
-		outb = finishBlock(d->bufferSize, &d->out, outb);
+		finishBlock(d->bufferSize, &d->out, outb);
+		outb = allocBlock(d->bufferSize);
 	}
 
 	freeBlock(inb);
@@ -224,7 +201,6 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	td.out.compressedChkToken = compressedChkToken_;
 	td.out.nextIdx = 0;
 	td.out.pendingBlocks = NULL;
-	td.out.freeBlocks = NULL;
 	pthread_mutex_init(&td.out.mut, NULL);
 
 	td.out.blkx = (BLKXTable*) malloc(sizeof(BLKXTable) + (2 * sizeof(BLKXRun)));
@@ -260,7 +236,6 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 		ASSERT(pthread_join(threads[i], &ret) == 0, "thread join");
 		ASSERT(ret == NULL, "thread return");
 	}
-	releaseFree(&td.out);
 	free(threads);
 
 	if(td.in.curRun >= td.out.roomForRuns) {
