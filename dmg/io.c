@@ -64,18 +64,24 @@ void readBlock(threadData* d, block *inb) {
 	d->curRun++;
 }
 
+void compressBlock(threadData* d, block *inb, block *outb) {
+	outb->run = inb->run;
+	outb->bufsize = lzfse_encode_buffer(outb->buf, d->bufferSize, inb->buf, inb->bufsize, NULL);
+	ASSERT(outb->bufsize > 0, "compression error");
+}
+
 void* threadWorker(void* arg) {
 	threadData* d;
 	block inb;
+	block outb;
 
 	d = (threadData*)arg;
 	ASSERT(inb.buf = (unsigned char*) malloc(d->bufferSize), "malloc");
+	ASSERT(outb.buf = (unsigned char*) malloc(d->bufferSize), "malloc");
 
 	while(d->numSectors > 0) {
 		readBlock(d, &inb);
-
-		d->have = lzfse_encode_buffer(d->outBuffer, d->bufferSize, inb.buf, inb.bufsize, NULL);
-		ASSERT(d->have > 0, "compression error");
+		compressBlock(d, &inb, &outb);
 
 		if((d->have / SECTOR_SIZE) > d->blkx->runs[inb.run].sectorCount) {
 			d->blkx->runs[inb.run].type = BLOCK_RAW;
@@ -96,6 +102,7 @@ void* threadWorker(void* arg) {
 	}
 
 	free(inb.buf);
+	free(outb.buf);
 
 	return NULL;
 }
