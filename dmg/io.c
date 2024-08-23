@@ -28,15 +28,16 @@ typedef struct {
 } inData;
 
 typedef struct {
-	inData in;
-
 	AbstractFile* out;
 	ChecksumFunc compressedChk;
 	void* compressedChkToken;
-
 	BLKXTable* blkx;
-
 	uint32_t roomForRuns;
+} outData;
+
+typedef struct {
+	inData in;
+	outData out;
 	size_t bufferSize;
 } threadData;
 
@@ -60,11 +61,11 @@ void readBlock(inData* i, block *inb) {
 	i->numSectors -= inb->run.sectorCount;
 }
 
-void compressBlock(threadData* d, block *inb, block *outb) {
+void compressBlock(size_t bufferSize, block *inb, block *outb) {
 	outb->idx = inb->idx;
 	outb->run = inb->run;
 
-	outb->bufsize = lzfse_encode_buffer(outb->buf, d->bufferSize, inb->buf, inb->bufsize, NULL);
+	outb->bufsize = lzfse_encode_buffer(outb->buf, bufferSize, inb->buf, inb->bufsize, NULL);
 	ASSERT(outb->bufsize > 0, "compression error");
 
 	if (outb->bufsize > inb->bufsize) {
@@ -77,19 +78,19 @@ void compressBlock(threadData* d, block *inb, block *outb) {
 	outb->run.compLength = outb->bufsize;
 }
 
-void writeBlock(threadData* d, block *outb) {
-	outb->run.compOffset = d->out->tell(d->out) - d->blkx->dataStart;
+void writeBlock(outData* o, block *outb) {
+	outb->run.compOffset = o->out->tell(o->out) - o->blkx->dataStart;
 
-	if(outb->idx >= d->roomForRuns) {
-		d->roomForRuns <<= 1;
-		d->blkx = (BLKXTable*) realloc(d->blkx, sizeof(BLKXTable) + (d->roomForRuns * sizeof(BLKXRun)));
+	if(outb->idx >= o->roomForRuns) {
+		o->roomForRuns <<= 1;
+		o->blkx = (BLKXTable*) realloc(o->blkx, sizeof(BLKXTable) + (o->roomForRuns * sizeof(BLKXRun)));
 	}
-	d->blkx->runs[outb->idx] = outb->run;
+	o->blkx->runs[outb->idx] = outb->run;
 
-	ASSERT(d->out->write(d->out, outb->buf, outb->bufsize) == outb->bufsize, "fwrite");
+	ASSERT(o->out->write(o->out, outb->buf, outb->bufsize) == outb->bufsize, "fwrite");
 
-	if(d->compressedChk)
-		(*d->compressedChk)(d->compressedChkToken, outb->buf, outb->bufsize);
+	if(o->compressedChk)
+		(*o->compressedChk)(o->compressedChkToken, outb->buf, outb->bufsize);
 }
 
 void* threadWorker(void* arg) {
@@ -110,13 +111,13 @@ void* threadWorker(void* arg) {
 		if (d->in.numSectors)
 			readBlock(&d->in, &inb2);
 
-		compressBlock(d, &inb1, &outb1);
+		compressBlock(d->bufferSize, &inb1, &outb1);
 		if (inb2.idx)
-			compressBlock(d, &inb2, &outb2);
+			compressBlock(d->bufferSize, &inb2, &outb2);
 
-		writeBlock(d, &outb1);
+		writeBlock(&d->out, &outb1);
 		if (inb2.idx)
-			writeBlock(d, &outb2);
+			writeBlock(&d->out, &outb2);
 	}
 
 	free(inb1.buf);
@@ -141,52 +142,52 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	td.in.curRun = 0;
 	td.in.curSector = 0;
 
-	td.out = out_;
-	td.compressedChk = compressedChk_;
-	td.compressedChkToken = compressedChkToken_;
+	td.out.out = out_;
+	td.out.compressedChk = compressedChk_;
+	td.out.compressedChkToken = compressedChkToken_;
 
-	td.blkx = (BLKXTable*) malloc(sizeof(BLKXTable) + (2 * sizeof(BLKXRun)));
-	td.roomForRuns = 2;
-	memset(td.blkx, 0, sizeof(BLKXTable) + (td.roomForRuns * sizeof(BLKXRun)));
+	td.out.blkx = (BLKXTable*) malloc(sizeof(BLKXTable) + (2 * sizeof(BLKXRun)));
+	td.out.roomForRuns = 2;
+	memset(td.out.blkx, 0, sizeof(BLKXTable) + (td.out.roomForRuns * sizeof(BLKXRun)));
 
-	td.blkx->fUDIFBlocksSignature = UDIF_BLOCK_SIGNATURE;
-	td.blkx->infoVersion = 1;
-	td.blkx->firstSectorNumber = firstSectorNumber;
-	td.blkx->sectorCount = td.in.numSectors;
-	td.blkx->dataStart = 0;
-	td.blkx->decompressBufferRequested = SECTORS_AT_A_TIME + 8;
-	td.blkx->blocksDescriptor = blocksDescriptor;
-	td.blkx->reserved1 = 0;
-	td.blkx->reserved2 = 0;
-	td.blkx->reserved3 = 0;
-	td.blkx->reserved4 = 0;
-	td.blkx->reserved5 = 0;
-	td.blkx->reserved6 = 0;
-	memset(&(td.blkx->checksum), 0, sizeof(td.blkx->checksum));
-	td.blkx->checksum.type = checksumType;
-	td.blkx->checksum.size = 0x20;
-	td.blkx->blocksRunCount = 0;
+	td.out.blkx->fUDIFBlocksSignature = UDIF_BLOCK_SIGNATURE;
+	td.out.blkx->infoVersion = 1;
+	td.out.blkx->firstSectorNumber = firstSectorNumber;
+	td.out.blkx->sectorCount = td.in.numSectors;
+	td.out.blkx->dataStart = 0;
+	td.out.blkx->decompressBufferRequested = SECTORS_AT_A_TIME + 8;
+	td.out.blkx->blocksDescriptor = blocksDescriptor;
+	td.out.blkx->reserved1 = 0;
+	td.out.blkx->reserved2 = 0;
+	td.out.blkx->reserved3 = 0;
+	td.out.blkx->reserved4 = 0;
+	td.out.blkx->reserved5 = 0;
+	td.out.blkx->reserved6 = 0;
+	memset(&(td.out.blkx->checksum), 0, sizeof(td.out.blkx->checksum));
+	td.out.blkx->checksum.type = checksumType;
+	td.out.blkx->checksum.size = 0x20;
+	td.out.blkx->blocksRunCount = 0;
 
-	td.bufferSize = SECTOR_SIZE * td.blkx->decompressBufferRequested;
+	td.bufferSize = SECTOR_SIZE * td.out.blkx->decompressBufferRequested;
 
 	ASSERT(pthread_create(&thread, NULL, &threadWorker, &td) == 0, "thread create");
 	ASSERT(pthread_join(thread, &ret) == 0, "thread join");
 	ASSERT(ret == NULL, "thread return");
 
-	if(td.in.curRun >= td.roomForRuns) {
-		td.roomForRuns <<= 1;
-		td.blkx = (BLKXTable*) realloc(td.blkx, sizeof(BLKXTable) + (td.roomForRuns * sizeof(BLKXRun)));
+	if(td.in.curRun >= td.out.roomForRuns) {
+		td.out.roomForRuns <<= 1;
+		td.out.blkx = (BLKXTable*) realloc(td.out.blkx, sizeof(BLKXTable) + (td.out.roomForRuns * sizeof(BLKXRun)));
 	}
 
-	td.blkx->runs[td.in.curRun].type = BLOCK_TERMINATOR;
-	td.blkx->runs[td.in.curRun].reserved = 0;
-	td.blkx->runs[td.in.curRun].sectorStart = td.in.curSector;
-	td.blkx->runs[td.in.curRun].sectorCount = 0;
-	td.blkx->runs[td.in.curRun].compOffset = td.out->tell(td.out) - td.blkx->dataStart;
-	td.blkx->runs[td.in.curRun].compLength = 0;
-	td.blkx->blocksRunCount = td.in.curRun + 1;
+	td.out.blkx->runs[td.in.curRun].type = BLOCK_TERMINATOR;
+	td.out.blkx->runs[td.in.curRun].reserved = 0;
+	td.out.blkx->runs[td.in.curRun].sectorStart = td.in.curSector;
+	td.out.blkx->runs[td.in.curRun].sectorCount = 0;
+	td.out.blkx->runs[td.in.curRun].compOffset = td.out.out->tell(td.out.out) - td.out.blkx->dataStart;
+	td.out.blkx->runs[td.in.curRun].compLength = 0;
+	td.out.blkx->blocksRunCount = td.in.curRun + 1;
 
-	return td.blkx;
+	return td.out.blkx;
 }
 
 #define DEFAULT_BUFFER_SIZE (1 * 1024 * 1024)
