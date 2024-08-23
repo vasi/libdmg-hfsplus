@@ -13,6 +13,7 @@
 
 typedef struct {
 	uint32_t idx;
+	BLKXRun run;
 	unsigned char* buf;
 	size_t bufsize;
 } block;
@@ -35,48 +36,56 @@ typedef struct {
 } threadData;
 
 void readBlock(threadData* d, block *inb) {
-	if(d->curRun >= d->roomForRuns) {
-		d->roomForRuns <<= 1;
-		d->blkx = (BLKXTable*) realloc(d->blkx, sizeof(BLKXTable) + (d->roomForRuns * sizeof(BLKXRun)));
-	}
+	size_t datasize;
 
-	d->blkx->runs[d->curRun].type = BLOCK_LZFSE;
-	d->blkx->runs[d->curRun].reserved = 0;
-	d->blkx->runs[d->curRun].sectorStart = d->curSector;
-	d->blkx->runs[d->curRun].sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
+	inb->run.reserved = 0;
+	inb->run.sectorStart = d->curSector;
+	inb->run.sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
 
-	printf("run %d: sectors=%" PRId64 ", left=%d\n", d->curRun, d->blkx->runs[d->curRun].sectorCount, d->numSectors);
+	printf("run %d: sectors=%" PRId64 ", left=%d\n", d->curRun, inb->run.sectorCount, d->numSectors);
 
 	inb->idx = d->curRun;
-	ASSERT((inb->bufsize = d->in->read(d->in, inb->buf, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE)) == (d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE), "mRead");
+	datasize = inb->run.sectorCount * SECTOR_SIZE;
+	ASSERT((inb->bufsize = d->in->read(d->in, inb->buf, datasize)) == datasize, "mRead");
 
 	if(d->uncompressedChk)
-		(*d->uncompressedChk)(d->uncompressedChkToken, inb->buf, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
+		(*d->uncompressedChk)(d->uncompressedChkToken, inb->buf, inb->bufsize);
 
-	d->curSector += d->blkx->runs[d->curRun].sectorCount;
-	d->numSectors -= d->blkx->runs[d->curRun].sectorCount;
+	d->curSector += inb->run.sectorCount;
+	d->numSectors -= inb->run.sectorCount;
 	d->curRun++;
 }
 
 void compressBlock(threadData* d, block *inb, block *outb) {
 	outb->idx = inb->idx;
+	outb->run = inb->run;
+
 	outb->bufsize = lzfse_encode_buffer(outb->buf, d->bufferSize, inb->buf, inb->bufsize, NULL);
 	ASSERT(outb->bufsize > 0, "compression error");
 
 	if (outb->bufsize > inb->bufsize) {
-		d->blkx->runs[inb->idx].type = BLOCK_RAW;
+		outb->run.type = BLOCK_RAW;
 		memcpy(outb->buf, inb->buf, inb->bufsize);
 		outb->bufsize = inb->bufsize;
+	} else {
+		outb->run.type = BLOCK_LZFSE;
 	}
+	outb->run.compLength = outb->bufsize;
 }
 
 void writeBlock(threadData* d, block *outb) {
-	d->blkx->runs[outb->idx].compOffset = d->out->tell(d->out) - d->blkx->dataStart;
+	outb->run.compOffset = d->out->tell(d->out) - d->blkx->dataStart;
+
+	if(outb->idx >= d->roomForRuns) {
+		d->roomForRuns <<= 1;
+		d->blkx = (BLKXTable*) realloc(d->blkx, sizeof(BLKXTable) + (d->roomForRuns * sizeof(BLKXRun)));
+	}
+	d->blkx->runs[outb->idx] = outb->run;
+
 	ASSERT(d->out->write(d->out, outb->buf, outb->bufsize) == outb->bufsize, "fwrite");
 
 	if(d->compressedChk)
 		(*d->compressedChk)(d->compressedChkToken, outb->buf, outb->bufsize);
-	d->blkx->runs[outb->idx].compLength = outb->bufsize;
 }
 
 void* threadWorker(void* arg) {
@@ -87,6 +96,7 @@ void* threadWorker(void* arg) {
 	d = (threadData*)arg;
 	ASSERT(inb1.buf = (unsigned char*) malloc(d->bufferSize), "malloc");
 	ASSERT(inb2.buf = (unsigned char*) malloc(d->bufferSize), "malloc");
+
 	ASSERT(outb1.buf = (unsigned char*) malloc(d->bufferSize), "malloc");
 	ASSERT(outb2.buf = (unsigned char*) malloc(d->bufferSize), "malloc");
 
