@@ -206,7 +206,7 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 			uint32_t checksumType, ChecksumFunc uncompressedChk_, void* uncompressedChkToken_, ChecksumFunc compressedChk_,
 			void* compressedChkToken_, Volume* volume, int zlibLevel) {
 	threadData td;
-	pthread_t thread;
+	pthread_t thread1, thread2;
 	void* ret;
 
 	td.in.in = in_;
@@ -249,8 +249,12 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 
 	td.bufferSize = SECTOR_SIZE * td.out.blkx->decompressBufferRequested;
 
-	ASSERT(pthread_create(&thread, NULL, &threadWorker, &td) == 0, "thread create");
-	ASSERT(pthread_join(thread, &ret) == 0, "thread join");
+	ASSERT(pthread_create(&thread1, NULL, &threadWorker, &td) == 0, "thread create");
+	ASSERT(pthread_create(&thread2, NULL, &threadWorker, &td) == 0, "thread create");
+
+	ASSERT(pthread_join(thread1, &ret) == 0, "thread join");
+	ASSERT(ret == NULL, "thread return");
+	ASSERT(pthread_join(thread2, &ret) == 0, "thread join");
 	ASSERT(ret == NULL, "thread return");
 	releaseFree(&td.out);
 
