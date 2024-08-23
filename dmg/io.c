@@ -31,10 +31,7 @@ typedef struct {
 	uint32_t roomForRuns;
 	uint32_t curRun;
 	uint64_t curSector;
-
-	unsigned char* outBuffer;
 	size_t bufferSize;
-	size_t have;
 } threadData;
 
 void readBlock(threadData* d, block *inb) {
@@ -83,7 +80,7 @@ void* threadWorker(void* arg) {
 		readBlock(d, &inb);
 		compressBlock(d, &inb, &outb);
 
-		if((d->have / SECTOR_SIZE) > d->blkx->runs[inb.run].sectorCount) {
+		if((outb.bufsize / SECTOR_SIZE) > d->blkx->runs[inb.run].sectorCount) {
 			d->blkx->runs[inb.run].type = BLOCK_RAW;
 			ASSERT(d->out->write(d->out, inb.buf, d->blkx->runs[inb.run].sectorCount * SECTOR_SIZE) == (d->blkx->runs[inb.run].sectorCount * SECTOR_SIZE), "fwrite");
 			d->blkx->runs[inb.run].compLength += d->blkx->runs[inb.run].sectorCount * SECTOR_SIZE;
@@ -92,12 +89,12 @@ void* threadWorker(void* arg) {
 				(*d->compressedChk)(d->compressedChkToken, inb.buf, d->blkx->runs[inb.run].sectorCount * SECTOR_SIZE);
 
 		} else {
-			ASSERT(d->out->write(d->out, d->outBuffer, d->have) == d->have, "fwrite");
+			ASSERT(d->out->write(d->out, outb.buf, outb.bufsize) == outb.bufsize, "fwrite");
 
 			if(d->compressedChk)
-				(*d->compressedChk)(d->compressedChkToken, d->outBuffer, d->have);
+				(*d->compressedChk)(d->compressedChkToken, outb.buf, outb.bufsize);
 
-			d->blkx->runs[inb.run].compLength += d->have;
+			d->blkx->runs[inb.run].compLength += outb.bufsize;
 		}
 	}
 
@@ -146,8 +143,6 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 
 	td.bufferSize = SECTOR_SIZE * td.blkx->decompressBufferRequested;
 
-	ASSERT(td.outBuffer = (unsigned char*) malloc(td.bufferSize), "malloc");
-
 	td.curRun = 0;
 	td.curSector = 0;
 
@@ -167,8 +162,6 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	td.blkx->runs[td.curRun].compOffset = td.out->tell(td.out) - td.blkx->dataStart;
 	td.blkx->runs[td.curRun].compLength = 0;
 	td.blkx->blocksRunCount = td.curRun + 1;
-
-	free(td.outBuffer);
 
 	return td.blkx;
 }
