@@ -11,11 +11,13 @@
 
 #define SECTORS_AT_A_TIME 0x800
 
-typedef struct {
+typedef struct block {
 	uint32_t idx;
 	BLKXRun run;
 	unsigned char* buf;
 	size_t bufsize;
+
+	struct block* next;
 } block;
 
 typedef struct {
@@ -33,6 +35,9 @@ typedef struct {
 	void* compressedChkToken;
 	BLKXTable* blkx;
 	uint32_t roomForRuns;
+
+	uint32_t nextIdx;
+	block* pendingBlocks;
 } outData;
 
 typedef struct {
@@ -41,7 +46,7 @@ typedef struct {
 	size_t bufferSize;
 } threadData;
 
-void readBlock(inData* i, block *inb) {
+static void readBlock(inData* i, block *inb) {
 	size_t datasize;
 
 	inb->run.reserved = 0;
@@ -61,7 +66,7 @@ void readBlock(inData* i, block *inb) {
 	i->numSectors -= inb->run.sectorCount;
 }
 
-void compressBlock(size_t bufferSize, block *inb, block *outb) {
+static void compressBlock(size_t bufferSize, block *inb, block *outb) {
 	outb->idx = inb->idx;
 	outb->run = inb->run;
 
@@ -78,7 +83,7 @@ void compressBlock(size_t bufferSize, block *inb, block *outb) {
 	outb->run.compLength = outb->bufsize;
 }
 
-void writeBlock(outData* o, block *outb) {
+static void writeBlock(outData* o, block *outb) {
 	outb->run.compOffset = o->out->tell(o->out) - o->blkx->dataStart;
 
 	if(outb->idx >= o->roomForRuns) {
@@ -93,7 +98,24 @@ void writeBlock(outData* o, block *outb) {
 		(*o->compressedChk)(o->compressedChkToken, outb->buf, outb->bufsize);
 }
 
-void* threadWorker(void* arg) {
+static void addBlockPending(outData* o, block *outb) {
+	block** b;
+	for (b = &o->pendingBlocks; *b && (*b)->idx < outb->idx; b = &(*b)->next)
+		; /* pass */
+	outb->next = *b;
+	*b = outb;
+}
+
+static void writeBlocks(outData* o) {
+	block* b;
+	for (b = o->pendingBlocks; b && b->idx == o->nextIdx; b = b->next) {
+		writeBlock(o, b);
+		++o->nextIdx;
+	}
+	o->pendingBlocks = b;
+}
+
+static void* threadWorker(void* arg) {
 	threadData* d;
 	block inb1, inb2;
 	block outb1, outb2;
@@ -115,9 +137,10 @@ void* threadWorker(void* arg) {
 		if (inb2.idx)
 			compressBlock(d->bufferSize, &inb2, &outb2);
 
-		writeBlock(&d->out, &outb1);
 		if (inb2.idx)
-			writeBlock(&d->out, &outb2);
+			addBlockPending(&d->out, &outb2);
+		addBlockPending(&d->out, &outb1);
+		writeBlocks(&d->out);
 	}
 
 	free(inb1.buf);
@@ -145,6 +168,8 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	td.out.out = out_;
 	td.out.compressedChk = compressedChk_;
 	td.out.compressedChkToken = compressedChkToken_;
+	td.out.nextIdx = 0;
+	td.out.pendingBlocks = NULL;
 
 	td.out.blkx = (BLKXTable*) malloc(sizeof(BLKXTable) + (2 * sizeof(BLKXRun)));
 	td.out.roomForRuns = 2;
