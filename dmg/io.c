@@ -12,7 +12,7 @@
 #define SECTORS_AT_A_TIME 0x800
 
 typedef struct {
-	uint32_t run;
+	uint32_t idx;
 	unsigned char* buf;
 	size_t bufsize;
 } block;
@@ -47,7 +47,7 @@ void readBlock(threadData* d, block *inb) {
 
 	printf("run %d: sectors=%" PRId64 ", left=%d\n", d->curRun, d->blkx->runs[d->curRun].sectorCount, d->numSectors);
 
-	inb->run = d->curRun;
+	inb->idx = d->curRun;
 	ASSERT((inb->bufsize = d->in->read(d->in, inb->buf, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE)) == (d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE), "mRead");
 
 	if(d->uncompressedChk)
@@ -59,24 +59,24 @@ void readBlock(threadData* d, block *inb) {
 }
 
 void compressBlock(threadData* d, block *inb, block *outb) {
-	outb->run = inb->run;
+	outb->idx = inb->idx;
 	outb->bufsize = lzfse_encode_buffer(outb->buf, d->bufferSize, inb->buf, inb->bufsize, NULL);
 	ASSERT(outb->bufsize > 0, "compression error");
 
 	if (outb->bufsize > inb->bufsize) {
-		d->blkx->runs[inb->run].type = BLOCK_RAW;
+		d->blkx->runs[inb->idx].type = BLOCK_RAW;
 		memcpy(outb->buf, inb->buf, inb->bufsize);
 		outb->bufsize = inb->bufsize;
 	}
 }
 
 void writeBlock(threadData* d, block *outb) {
-	d->blkx->runs[outb->run].compOffset = d->out->tell(d->out) - d->blkx->dataStart;
+	d->blkx->runs[outb->idx].compOffset = d->out->tell(d->out) - d->blkx->dataStart;
 	ASSERT(d->out->write(d->out, outb->buf, outb->bufsize) == outb->bufsize, "fwrite");
 
 	if(d->compressedChk)
 		(*d->compressedChk)(d->compressedChkToken, outb->buf, outb->bufsize);
-	d->blkx->runs[outb->run].compLength = outb->bufsize;
+	d->blkx->runs[outb->idx].compLength = outb->bufsize;
 }
 
 void* threadWorker(void* arg) {
@@ -92,16 +92,16 @@ void* threadWorker(void* arg) {
 
 	while(d->numSectors > 0) {
 		readBlock(d, &inb1);
-		inb2.run = 0;
+		inb2.idx = 0;
 		if (d->numSectors)
 			readBlock(d, &inb2);
 
 		compressBlock(d, &inb1, &outb1);
-		if (inb2.run)
+		if (inb2.idx)
 			compressBlock(d, &inb2, &outb2);
 
 		writeBlock(d, &outb1);
-		if (inb2.run)
+		if (inb2.idx)
 			writeBlock(d, &outb2);
 	}
 
