@@ -182,35 +182,22 @@ static void releaseFree(outData* o) {
 
 static void* threadWorker(void* arg) {
 	threadData* d;
-	block *inb1, *inb2;
-	block *outb1, *outb2;
-	bool got1, got2;
+	block *inb, *outb;
 
 	d = (threadData*)arg;
-	inb1 = allocBlock(d->bufferSize);
-	inb2 = allocBlock(d->bufferSize);
-	outb1 = allocBlock(d->bufferSize);
-	outb2 = allocBlock(d->bufferSize);
-	got1 = got2 = true;
+	inb = allocBlock(d->bufferSize);
+	outb = allocBlock(d->bufferSize);
 
-	while(got2) {
-		got1 = readBlock(&d->in, inb1);
-		got2 = readBlock(&d->in, inb2);
+	while(true) {
+		if (!readBlock(&d->in, inb))
+			break;
 
-		if (got2)
-			compressBlock(d->bufferSize, inb2, outb2);
-		if (got1)
-			compressBlock(d->bufferSize, inb1, outb1);
-
-		if (got2)
-			outb2 = finishBlock(d->bufferSize, &d->out, outb2);
-		if (got1)
-			outb1 = finishBlock(d->bufferSize, &d->out, outb1);
+		compressBlock(d->bufferSize, inb, outb);
+		outb = finishBlock(d->bufferSize, &d->out, outb);
 	}
 
-	freeBlock(inb1);
-	freeBlock(inb2);
-	releaseFree(&d->out);
+	freeBlock(inb);
+	freeBlock(outb);
 
 	return NULL;
 }
@@ -265,6 +252,7 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	ASSERT(pthread_create(&thread, NULL, &threadWorker, &td) == 0, "thread create");
 	ASSERT(pthread_join(thread, &ret) == 0, "thread join");
 	ASSERT(ret == NULL, "thread return");
+	releaseFree(&td.out);
 
 	if(td.in.curRun >= td.out.roomForRuns) {
 		td.out.roomForRuns <<= 1;
