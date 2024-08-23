@@ -21,6 +21,8 @@ typedef struct block {
 } block;
 
 typedef struct {
+	pthread_mutex_t mut;
+
 	AbstractFile* in;
 	uint32_t numSectors;
 	ChecksumFunc uncompressedChk;
@@ -30,6 +32,8 @@ typedef struct {
 } inData;
 
 typedef struct {
+	pthread_mutex_t mut;
+
 	AbstractFile* out;
 	ChecksumFunc compressedChk;
 	void* compressedChkToken;
@@ -63,8 +67,12 @@ static void freeBlock(block* b) {
 static bool readBlock(inData* i, block *inb) {
 	size_t datasize;
 
-	if (i->numSectors == 0)
+	ASSERT(pthread_mutex_lock(&i->mut) == 0, "mutex lock");
+
+	if (i->numSectors == 0) {
+		ASSERT(pthread_mutex_unlock(&i->mut) == 0, "mutex unlock");
 		return false;
+	}
 
 	inb->run.reserved = 0;
 	inb->run.sectorStart = i->curSector;
@@ -81,6 +89,8 @@ static bool readBlock(inData* i, block *inb) {
 
 	i->curSector += inb->run.sectorCount;
 	i->numSectors -= inb->run.sectorCount;
+
+	ASSERT(pthread_mutex_unlock(&i->mut) == 0, "mutex unlock");
 	return true;
 }
 
@@ -149,8 +159,15 @@ static block* writeBlocks(size_t bufferSize, outData* o) {
 }
 
 static block* finishBlock(size_t bufferSize, outData* o, block *outb) {
+	block* b;
+
+	ASSERT(pthread_mutex_lock(&o->mut) == 0, "mutex lock");
+
 	addBlockPending(o, outb);
-	return writeBlocks(bufferSize, o);
+	b = writeBlocks(bufferSize, o);
+
+	ASSERT(pthread_mutex_unlock(&o->mut) == 0, "mutex unlock");
+	return b;
 }
 
 static void releaseFree(outData* o) {
@@ -211,6 +228,7 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	td.in.uncompressedChkToken = uncompressedChkToken_;
 	td.in.curRun = 0;
 	td.in.curSector = 0;
+	pthread_mutex_init(&td.in.mut, NULL);
 
 	td.out.out = out_;
 	td.out.compressedChk = compressedChk_;
@@ -218,6 +236,7 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	td.out.nextIdx = 0;
 	td.out.pendingBlocks = NULL;
 	td.out.freeBlocks = NULL;
+	pthread_mutex_init(&td.out.mut, NULL);
 
 	td.out.blkx = (BLKXTable*) malloc(sizeof(BLKXTable) + (2 * sizeof(BLKXRun)));
 	td.out.roomForRuns = 2;
