@@ -37,6 +37,33 @@ typedef struct {
 	size_t have;
 } threadData;
 
+void readBlock(threadData* d, block *inb) {
+	if(d->curRun >= d->roomForRuns) {
+		d->roomForRuns <<= 1;
+		d->blkx = (BLKXTable*) realloc(d->blkx, sizeof(BLKXTable) + (d->roomForRuns * sizeof(BLKXRun)));
+	}
+
+	d->blkx->runs[d->curRun].type = BLOCK_LZFSE;
+	d->blkx->runs[d->curRun].reserved = 0;
+	d->blkx->runs[d->curRun].sectorStart = d->curSector;
+	d->blkx->runs[d->curRun].sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
+
+	printf("run %d: sectors=%" PRId64 ", left=%d\n", d->curRun, d->blkx->runs[d->curRun].sectorCount, d->numSectors);
+
+	inb->run = d->curRun;
+	ASSERT((inb->bufsize = d->in->read(d->in, inb->buf, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE)) == (d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE), "mRead");
+
+	if(d->uncompressedChk)
+		(*d->uncompressedChk)(d->uncompressedChkToken, inb->buf, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
+
+	d->blkx->runs[d->curRun].compOffset = d->out->tell(d->out) - d->blkx->dataStart;
+	d->blkx->runs[d->curRun].compLength = 0;
+
+	d->curSector += d->blkx->runs[d->curRun].sectorCount;
+	d->numSectors -= d->blkx->runs[d->curRun].sectorCount;
+	d->curRun++;
+}
+
 void* threadWorker(void* arg) {
 	threadData* d;
 	block inb;
@@ -45,37 +72,18 @@ void* threadWorker(void* arg) {
 	ASSERT(inb.buf = (unsigned char*) malloc(d->bufferSize), "malloc");
 
 	while(d->numSectors > 0) {
-		if(d->curRun >= d->roomForRuns) {
-			d->roomForRuns <<= 1;
-			d->blkx = (BLKXTable*) realloc(d->blkx, sizeof(BLKXTable) + (d->roomForRuns * sizeof(BLKXRun)));
-		}
-
-		d->blkx->runs[d->curRun].type = BLOCK_LZFSE;
-		d->blkx->runs[d->curRun].reserved = 0;
-		d->blkx->runs[d->curRun].sectorStart = d->curSector;
-		d->blkx->runs[d->curRun].sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
-
-		printf("run %d: sectors=%" PRId64 ", left=%d\n", d->curRun, d->blkx->runs[d->curRun].sectorCount, d->numSectors);
-
-		inb.run = d->curRun;
-		ASSERT((inb.bufsize = d->in->read(d->in, inb.buf, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE)) == (d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE), "mRead");
-
-		if(d->uncompressedChk)
-			(*d->uncompressedChk)(d->uncompressedChkToken, inb.buf, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
-
-		d->blkx->runs[d->curRun].compOffset = d->out->tell(d->out) - d->blkx->dataStart;
-		d->blkx->runs[d->curRun].compLength = 0;
+		readBlock(d, &inb);
 
 		d->have = lzfse_encode_buffer(d->outBuffer, d->bufferSize, inb.buf, inb.bufsize, NULL);
 		ASSERT(d->have > 0, "compression error");
 
-		if((d->have / SECTOR_SIZE) > d->blkx->runs[d->curRun].sectorCount) {
-			d->blkx->runs[d->curRun].type = BLOCK_RAW;
-			ASSERT(d->out->write(d->out, inb.buf, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE) == (d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE), "fwrite");
-			d->blkx->runs[d->curRun].compLength += d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE;
+		if((d->have / SECTOR_SIZE) > d->blkx->runs[inb.run].sectorCount) {
+			d->blkx->runs[inb.run].type = BLOCK_RAW;
+			ASSERT(d->out->write(d->out, inb.buf, d->blkx->runs[inb.run].sectorCount * SECTOR_SIZE) == (d->blkx->runs[inb.run].sectorCount * SECTOR_SIZE), "fwrite");
+			d->blkx->runs[inb.run].compLength += d->blkx->runs[inb.run].sectorCount * SECTOR_SIZE;
 
 			if(d->compressedChk)
-				(*d->compressedChk)(d->compressedChkToken, inb.buf, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
+				(*d->compressedChk)(d->compressedChkToken, inb.buf, d->blkx->runs[inb.run].sectorCount * SECTOR_SIZE);
 
 		} else {
 			ASSERT(d->out->write(d->out, d->outBuffer, d->have) == d->have, "fwrite");
@@ -83,12 +91,8 @@ void* threadWorker(void* arg) {
 			if(d->compressedChk)
 				(*d->compressedChk)(d->compressedChkToken, d->outBuffer, d->have);
 
-			d->blkx->runs[d->curRun].compLength += d->have;
+			d->blkx->runs[inb.run].compLength += d->have;
 		}
-
-		d->curSector += d->blkx->runs[d->curRun].sectorCount;
-		d->numSectors -= d->blkx->runs[d->curRun].sectorCount;
-		d->curRun++;
 	}
 
 	free(inb.buf);
