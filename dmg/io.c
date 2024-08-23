@@ -127,6 +127,11 @@ static void writeBlocks(outData* o) {
 	o->pendingBlocks = b;
 }
 
+static void finishBlock(outData* o, block *outb) {
+	addBlockPending(o, outb);
+	writeBlocks(o);
+}
+
 static void* threadWorker(void* arg) {
 	threadData* d;
 	block *inb1, *inb2;
@@ -149,9 +154,8 @@ static void* threadWorker(void* arg) {
 			compressBlock(d->bufferSize, inb2, outb2);
 
 		if (inb2->idx)
-			addBlockPending(&d->out, outb2);
-		addBlockPending(&d->out, outb1);
-		writeBlocks(&d->out);
+			finishBlock(&d->out, outb2);
+		finishBlock(&d->out, outb1);
 	}
 
 	freeBlock(inb1);
