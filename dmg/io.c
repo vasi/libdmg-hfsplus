@@ -81,21 +81,34 @@ void writeBlock(threadData* d, block *outb) {
 
 void* threadWorker(void* arg) {
 	threadData* d;
-	block inb;
-	block outb;
+	block inb1, inb2;
+	block outb1, outb2;
 
 	d = (threadData*)arg;
-	ASSERT(inb.buf = (unsigned char*) malloc(d->bufferSize), "malloc");
-	ASSERT(outb.buf = (unsigned char*) malloc(d->bufferSize), "malloc");
+	ASSERT(inb1.buf = (unsigned char*) malloc(d->bufferSize), "malloc");
+	ASSERT(inb2.buf = (unsigned char*) malloc(d->bufferSize), "malloc");
+	ASSERT(outb1.buf = (unsigned char*) malloc(d->bufferSize), "malloc");
+	ASSERT(outb2.buf = (unsigned char*) malloc(d->bufferSize), "malloc");
 
 	while(d->numSectors > 0) {
-		readBlock(d, &inb);
-		compressBlock(d, &inb, &outb);
-		writeBlock(d, &outb);
+		readBlock(d, &inb1);
+		inb2.run = 0;
+		if (d->numSectors)
+			readBlock(d, &inb2);
+
+		compressBlock(d, &inb1, &outb1);
+		if (inb2.run)
+			compressBlock(d, &inb2, &outb2);
+
+		writeBlock(d, &outb1);
+		if (inb2.run)
+			writeBlock(d, &outb2);
 	}
 
-	free(inb.buf);
-	free(outb.buf);
+	free(inb1.buf);
+	free(inb2.buf);
+	free(outb1.buf);
+	free(outb2.buf);
 
 	return NULL;
 }
