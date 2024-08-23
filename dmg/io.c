@@ -11,6 +11,14 @@
 #define SECTORS_AT_A_TIME 0x800
 
 typedef struct {
+	AbstractFile* out;
+	AbstractFile* in;
+	uint32_t numSectors;
+	ChecksumFunc uncompressedChk;
+	void* uncompressedChkToken;
+	ChecksumFunc compressedChk;
+	void* compressedChkToken;
+
 	BLKXTable* blkx;
 
 	uint32_t roomForRuns;
@@ -24,11 +32,19 @@ typedef struct {
 	size_t have;
 } threadData;
 
-BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorNumber, uint32_t numSectors, uint32_t blocksDescriptor,
-			uint32_t checksumType, ChecksumFunc uncompressedChk, void* uncompressedChkToken, ChecksumFunc compressedChk,
-			void* compressedChkToken, Volume* volume, int zlibLevel) {
+BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSectorNumber, uint32_t numSectors_, uint32_t blocksDescriptor,
+			uint32_t checksumType, ChecksumFunc uncompressedChk_, void* uncompressedChkToken_, ChecksumFunc compressedChk_,
+			void* compressedChkToken_, Volume* volume, int zlibLevel) {
 	threadData td;
 	threadData* d;
+
+	td.out = out_;
+	td.in = in_;
+	td.numSectors = numSectors_;
+	td.uncompressedChk = uncompressedChk_;
+	td.uncompressedChkToken = uncompressedChkToken_;
+	td.compressedChk = compressedChk_;
+	td.compressedChkToken = compressedChkToken_;
 
 	td.blkx = (BLKXTable*) malloc(sizeof(BLKXTable) + (2 * sizeof(BLKXRun)));
 	td.roomForRuns = 2;
@@ -37,7 +53,7 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 	td.blkx->fUDIFBlocksSignature = UDIF_BLOCK_SIGNATURE;
 	td.blkx->infoVersion = 1;
 	td.blkx->firstSectorNumber = firstSectorNumber;
-	td.blkx->sectorCount = numSectors;
+	td.blkx->sectorCount = td.numSectors;
 	td.blkx->dataStart = 0;
 	td.blkx->decompressBufferRequested = SECTORS_AT_A_TIME + 8;
 	td.blkx->blocksDescriptor = blocksDescriptor;
@@ -62,7 +78,7 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 
 	d = &td;
 
-	while(numSectors > 0) {
+	while(d->numSectors > 0) {
 		if(d->curRun >= d->roomForRuns) {
 			d->roomForRuns <<= 1;
 			d->blkx = (BLKXTable*) realloc(d->blkx, sizeof(BLKXTable) + (d->roomForRuns * sizeof(BLKXRun)));
@@ -71,16 +87,16 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 		d->blkx->runs[d->curRun].type = BLOCK_LZFSE;
 		d->blkx->runs[d->curRun].reserved = 0;
 		d->blkx->runs[d->curRun].sectorStart = d->curSector;
-		d->blkx->runs[d->curRun].sectorCount = (numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : numSectors;
+		d->blkx->runs[d->curRun].sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
 
-		printf("run %d: sectors=%" PRId64 ", left=%d\n", d->curRun, d->blkx->runs[d->curRun].sectorCount, numSectors);
+		printf("run %d: sectors=%" PRId64 ", left=%d\n", d->curRun, d->blkx->runs[d->curRun].sectorCount, d->numSectors);
 
-		ASSERT((d->inSize = in->read(in, d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE)) == (d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE), "mRead");
+		ASSERT((d->inSize = d->in->read(d->in, d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE)) == (d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE), "mRead");
 
-		if(uncompressedChk)
-			(*uncompressedChk)(uncompressedChkToken, d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
+		if(d->uncompressedChk)
+			(*d->uncompressedChk)(d->uncompressedChkToken, d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
 
-		d->blkx->runs[d->curRun].compOffset = out->tell(out) - d->blkx->dataStart;
+		d->blkx->runs[d->curRun].compOffset = d->out->tell(d->out) - d->blkx->dataStart;
 		d->blkx->runs[d->curRun].compLength = 0;
 
 		d->have = lzfse_encode_buffer(d->outBuffer, d->bufferSize, d->inBuffer, d->inSize, NULL);
@@ -88,23 +104,23 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 
 		if((d->have / SECTOR_SIZE) > d->blkx->runs[d->curRun].sectorCount) {
 			d->blkx->runs[d->curRun].type = BLOCK_RAW;
-			ASSERT(out->write(out, d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE) == (d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE), "fwrite");
+			ASSERT(d->out->write(d->out, d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE) == (d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE), "fwrite");
 			d->blkx->runs[d->curRun].compLength += d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE;
 
-			if(compressedChk)
-				(*compressedChk)(compressedChkToken, d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
+			if(d->compressedChk)
+				(*d->compressedChk)(d->compressedChkToken, d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
 
 		} else {
-			ASSERT(out->write(out, d->outBuffer, d->have) == d->have, "fwrite");
+			ASSERT(d->out->write(d->out, d->outBuffer, d->have) == d->have, "fwrite");
 
-			if(compressedChk)
-				(*compressedChk)(compressedChkToken, d->outBuffer, d->have);
+			if(d->compressedChk)
+				(*d->compressedChk)(d->compressedChkToken, d->outBuffer, d->have);
 
 			d->blkx->runs[d->curRun].compLength += d->have;
 		}
 
 		d->curSector += d->blkx->runs[d->curRun].sectorCount;
-		numSectors -= d->blkx->runs[d->curRun].sectorCount;
+		d->numSectors -= d->blkx->runs[d->curRun].sectorCount;
 		d->curRun++;
 	}
 
@@ -117,7 +133,7 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 	td.blkx->runs[td.curRun].reserved = 0;
 	td.blkx->runs[td.curRun].sectorStart = td.curSector;
 	td.blkx->runs[td.curRun].sectorCount = 0;
-	td.blkx->runs[td.curRun].compOffset = out->tell(out) - td.blkx->dataStart;
+	td.blkx->runs[td.curRun].compOffset = td.out->tell(td.out) - td.blkx->dataStart;
 	td.blkx->runs[td.curRun].compLength = 0;
 	td.blkx->blocksRunCount = td.curRun + 1;
 
