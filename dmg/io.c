@@ -38,6 +38,7 @@ typedef struct {
 
 	uint32_t nextIdx;
 	block* pendingBlocks;
+	block* freeBlocks;
 } outData;
 
 typedef struct {
@@ -108,6 +109,10 @@ static void writeBlock(outData* o, block *outb) {
 
 	if(o->compressedChk)
 		(*o->compressedChk)(o->compressedChkToken, outb->buf, outb->bufsize);
+
+	/* put onto free list */
+	outb->next = o->freeBlocks;
+	o->freeBlocks = outb;
 }
 
 static void addBlockPending(outData* o, block *outb) {
@@ -120,7 +125,9 @@ static void addBlockPending(outData* o, block *outb) {
 
 static void writeBlocks(outData* o) {
 	block* b;
-	for (b = o->pendingBlocks; b && b->idx == o->nextIdx; b = b->next) {
+	block* next;
+	for (b = o->pendingBlocks; b && b->idx == o->nextIdx; b = next) {
+		next = b->next;
 		writeBlock(o, b);
 		++o->nextIdx;
 	}
@@ -132,6 +139,16 @@ static void finishBlock(outData* o, block *outb) {
 	writeBlocks(o);
 }
 
+static void releaseAll(outData* o) {
+	block* b;
+	block* next;
+	for (b = o->freeBlocks; b; b = next) {
+		next = b->next;
+		freeBlock(b);
+	}
+	o->freeBlocks = NULL;
+}
+
 static void* threadWorker(void* arg) {
 	threadData* d;
 	block *inb1, *inb2;
@@ -140,10 +157,11 @@ static void* threadWorker(void* arg) {
 	d = (threadData*)arg;
 	inb1 = allocBlock(d->bufferSize);
 	inb2 = allocBlock(d->bufferSize);
-	outb1 = allocBlock(d->bufferSize);
-	outb2 = allocBlock(d->bufferSize);
 
 	while(d->in.numSectors > 0) {
+		outb1 = allocBlock(d->bufferSize);
+		outb2 = allocBlock(d->bufferSize);
+
 		readBlock(&d->in, inb1);
 		inb2->idx = 0;
 		if (d->in.numSectors)
@@ -156,12 +174,12 @@ static void* threadWorker(void* arg) {
 		if (inb2->idx)
 			finishBlock(&d->out, outb2);
 		finishBlock(&d->out, outb1);
+
+		releaseAll(&d->out);
 	}
 
 	freeBlock(inb1);
 	freeBlock(inb2);
-	freeBlock(outb1);
-	freeBlock(outb2);
 
 	return NULL;
 }
@@ -185,6 +203,7 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	td.out.compressedChkToken = compressedChkToken_;
 	td.out.nextIdx = 0;
 	td.out.pendingBlocks = NULL;
+	td.out.freeBlocks = NULL;
 
 	td.out.blkx = (BLKXTable*) malloc(sizeof(BLKXTable) + (2 * sizeof(BLKXRun)));
 	td.out.roomForRuns = 2;
