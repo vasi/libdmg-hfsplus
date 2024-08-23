@@ -46,6 +46,18 @@ typedef struct {
 	size_t bufferSize;
 } threadData;
 
+static block* allocBlock(size_t bufferSize) {
+	block* b;
+	ASSERT(b = (block*) malloc(sizeof(block)), "malloc");
+	ASSERT(b->buf = malloc(bufferSize), "malloc");
+	return b;
+}
+
+static void freeBlock(block* b) {
+	free(b->buf);
+	free(b);
+}
+
 static void readBlock(inData* i, block *inb) {
 	size_t datasize;
 
@@ -117,36 +129,35 @@ static void writeBlocks(outData* o) {
 
 static void* threadWorker(void* arg) {
 	threadData* d;
-	block inb1, inb2;
-	block outb1, outb2;
+	block *inb1, *inb2;
+	block *outb1, *outb2;
 
 	d = (threadData*)arg;
-	ASSERT(inb1.buf = (unsigned char*) malloc(d->bufferSize), "malloc");
-	ASSERT(inb2.buf = (unsigned char*) malloc(d->bufferSize), "malloc");
-
-	ASSERT(outb1.buf = (unsigned char*) malloc(d->bufferSize), "malloc");
-	ASSERT(outb2.buf = (unsigned char*) malloc(d->bufferSize), "malloc");
+	inb1 = allocBlock(d->bufferSize);
+	inb2 = allocBlock(d->bufferSize);
+	outb1 = allocBlock(d->bufferSize);
+	outb2 = allocBlock(d->bufferSize);
 
 	while(d->in.numSectors > 0) {
-		readBlock(&d->in, &inb1);
-		inb2.idx = 0;
+		readBlock(&d->in, inb1);
+		inb2->idx = 0;
 		if (d->in.numSectors)
-			readBlock(&d->in, &inb2);
+			readBlock(&d->in, inb2);
 
-		compressBlock(d->bufferSize, &inb1, &outb1);
-		if (inb2.idx)
-			compressBlock(d->bufferSize, &inb2, &outb2);
+		compressBlock(d->bufferSize, inb1, outb1);
+		if (inb2->idx)
+			compressBlock(d->bufferSize, inb2, outb2);
 
-		if (inb2.idx)
-			addBlockPending(&d->out, &outb2);
-		addBlockPending(&d->out, &outb1);
+		if (inb2->idx)
+			addBlockPending(&d->out, outb2);
+		addBlockPending(&d->out, outb1);
 		writeBlocks(&d->out);
 	}
 
-	free(inb1.buf);
-	free(inb2.buf);
-	free(outb1.buf);
-	free(outb2.buf);
+	freeBlock(inb1);
+	freeBlock(inb2);
+	freeBlock(outb1);
+	freeBlock(outb2);
 
 	return NULL;
 }
