@@ -70,6 +70,15 @@ void compressBlock(threadData* d, block *inb, block *outb) {
 	}
 }
 
+void writeBlock(threadData* d, block *outb) {
+	d->blkx->runs[outb->run].compOffset = d->out->tell(d->out) - d->blkx->dataStart;
+	ASSERT(d->out->write(d->out, outb->buf, outb->bufsize) == outb->bufsize, "fwrite");
+
+	if(d->compressedChk)
+		(*d->compressedChk)(d->compressedChkToken, outb->buf, outb->bufsize);
+	d->blkx->runs[outb->run].compLength = outb->bufsize;
+}
+
 void* threadWorker(void* arg) {
 	threadData* d;
 	block inb;
@@ -82,13 +91,7 @@ void* threadWorker(void* arg) {
 	while(d->numSectors > 0) {
 		readBlock(d, &inb);
 		compressBlock(d, &inb, &outb);
-
-		d->blkx->runs[outb.run].compOffset = d->out->tell(d->out) - d->blkx->dataStart;
-		ASSERT(d->out->write(d->out, outb.buf, outb.bufsize) == outb.bufsize, "fwrite");
-
-		if(d->compressedChk)
-			(*d->compressedChk)(d->compressedChkToken, outb.buf, outb.bufsize);
-		d->blkx->runs[outb.run].compLength = outb.bufsize;
+		writeBlock(d, &outb);
 	}
 
 	free(inb.buf);
