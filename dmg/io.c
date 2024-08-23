@@ -80,7 +80,7 @@ static bool readBlock(inData* i, block *inb) {
 	inb->run.sectorCount = (i->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : i->numSectors;
 	inb->idx = i->curRun++;
 
-	printf("run %d: sectors=%" PRId64 ", left=%d\n", inb->idx, inb->run.sectorCount, i->numSectors);
+	// printf("run %d: sectors=%" PRId64 ", left=%d\n", inb->idx, inb->run.sectorCount, i->numSectors);
 
 	datasize = inb->run.sectorCount * SECTOR_SIZE;
 	ASSERT((inb->bufsize = i->in->read(i->in, inb->buf, datasize)) == datasize, "mRead");
