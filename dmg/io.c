@@ -32,51 +32,8 @@ typedef struct {
 	size_t have;
 } threadData;
 
-BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSectorNumber, uint32_t numSectors_, uint32_t blocksDescriptor,
-			uint32_t checksumType, ChecksumFunc uncompressedChk_, void* uncompressedChkToken_, ChecksumFunc compressedChk_,
-			void* compressedChkToken_, Volume* volume, int zlibLevel) {
-	threadData td;
-	threadData* d;
-
-	td.out = out_;
-	td.in = in_;
-	td.numSectors = numSectors_;
-	td.uncompressedChk = uncompressedChk_;
-	td.uncompressedChkToken = uncompressedChkToken_;
-	td.compressedChk = compressedChk_;
-	td.compressedChkToken = compressedChkToken_;
-
-	td.blkx = (BLKXTable*) malloc(sizeof(BLKXTable) + (2 * sizeof(BLKXRun)));
-	td.roomForRuns = 2;
-	memset(td.blkx, 0, sizeof(BLKXTable) + (td.roomForRuns * sizeof(BLKXRun)));
-
-	td.blkx->fUDIFBlocksSignature = UDIF_BLOCK_SIGNATURE;
-	td.blkx->infoVersion = 1;
-	td.blkx->firstSectorNumber = firstSectorNumber;
-	td.blkx->sectorCount = td.numSectors;
-	td.blkx->dataStart = 0;
-	td.blkx->decompressBufferRequested = SECTORS_AT_A_TIME + 8;
-	td.blkx->blocksDescriptor = blocksDescriptor;
-	td.blkx->reserved1 = 0;
-	td.blkx->reserved2 = 0;
-	td.blkx->reserved3 = 0;
-	td.blkx->reserved4 = 0;
-	td.blkx->reserved5 = 0;
-	td.blkx->reserved6 = 0;
-	memset(&(td.blkx->checksum), 0, sizeof(td.blkx->checksum));
-	td.blkx->checksum.type = checksumType;
-	td.blkx->checksum.size = 0x20;
-	td.blkx->blocksRunCount = 0;
-
-	td.bufferSize = SECTOR_SIZE * td.blkx->decompressBufferRequested;
-
-	ASSERT(td.inBuffer = (unsigned char*) malloc(td.bufferSize), "malloc");
-	ASSERT(td.outBuffer = (unsigned char*) malloc(td.bufferSize), "malloc");
-
-	td.curRun = 0;
-	td.curSector = 0;
-
-	d = &td;
+void* threadWorker(void* arg) {
+	threadData* d = (threadData*)arg;
 
 	while(d->numSectors > 0) {
 		if(d->curRun >= d->roomForRuns) {
@@ -123,6 +80,54 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 		d->numSectors -= d->blkx->runs[d->curRun].sectorCount;
 		d->curRun++;
 	}
+
+	return NULL;
+}
+
+BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSectorNumber, uint32_t numSectors_, uint32_t blocksDescriptor,
+			uint32_t checksumType, ChecksumFunc uncompressedChk_, void* uncompressedChkToken_, ChecksumFunc compressedChk_,
+			void* compressedChkToken_, Volume* volume, int zlibLevel) {
+	threadData td;
+
+	td.out = out_;
+	td.in = in_;
+	td.numSectors = numSectors_;
+	td.uncompressedChk = uncompressedChk_;
+	td.uncompressedChkToken = uncompressedChkToken_;
+	td.compressedChk = compressedChk_;
+	td.compressedChkToken = compressedChkToken_;
+
+	td.blkx = (BLKXTable*) malloc(sizeof(BLKXTable) + (2 * sizeof(BLKXRun)));
+	td.roomForRuns = 2;
+	memset(td.blkx, 0, sizeof(BLKXTable) + (td.roomForRuns * sizeof(BLKXRun)));
+
+	td.blkx->fUDIFBlocksSignature = UDIF_BLOCK_SIGNATURE;
+	td.blkx->infoVersion = 1;
+	td.blkx->firstSectorNumber = firstSectorNumber;
+	td.blkx->sectorCount = td.numSectors;
+	td.blkx->dataStart = 0;
+	td.blkx->decompressBufferRequested = SECTORS_AT_A_TIME + 8;
+	td.blkx->blocksDescriptor = blocksDescriptor;
+	td.blkx->reserved1 = 0;
+	td.blkx->reserved2 = 0;
+	td.blkx->reserved3 = 0;
+	td.blkx->reserved4 = 0;
+	td.blkx->reserved5 = 0;
+	td.blkx->reserved6 = 0;
+	memset(&(td.blkx->checksum), 0, sizeof(td.blkx->checksum));
+	td.blkx->checksum.type = checksumType;
+	td.blkx->checksum.size = 0x20;
+	td.blkx->blocksRunCount = 0;
+
+	td.bufferSize = SECTOR_SIZE * td.blkx->decompressBufferRequested;
+
+	ASSERT(td.inBuffer = (unsigned char*) malloc(td.bufferSize), "malloc");
+	ASSERT(td.outBuffer = (unsigned char*) malloc(td.bufferSize), "malloc");
+
+	td.curRun = 0;
+	td.curSector = 0;
+
+	ASSERT(threadWorker(&td) == NULL, "worker");
 
 	if(td.curRun >= td.roomForRuns) {
 		td.roomForRuns <<= 1;
