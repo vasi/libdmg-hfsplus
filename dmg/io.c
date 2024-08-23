@@ -80,13 +80,13 @@ void* threadWorker(void* arg) {
 		compressBlock(d, &inb, &outb);
 
 		d->blkx->runs[outb.run].compOffset = d->out->tell(d->out) - d->blkx->dataStart;
-		if((outb.bufsize / SECTOR_SIZE) > d->blkx->runs[outb.run].sectorCount) {
+		if(outb.bufsize > inb.bufsize) {
 			d->blkx->runs[outb.run].type = BLOCK_RAW;
-			ASSERT(d->out->write(d->out, outb.buf, d->blkx->runs[outb.run].sectorCount * SECTOR_SIZE) == (d->blkx->runs[outb.run].sectorCount * SECTOR_SIZE), "fwrite");
-			d->blkx->runs[outb.run].compLength += d->blkx->runs[outb.run].sectorCount * SECTOR_SIZE;
+			ASSERT(d->out->write(d->out, inb.buf, inb.bufsize) == inb.bufsize, "fwrite");
+			d->blkx->runs[outb.run].compLength += inb.bufsize;
 
 			if(d->compressedChk)
-				(*d->compressedChk)(d->compressedChkToken, inb.buf, d->blkx->runs[outb.run].sectorCount * SECTOR_SIZE);
+				(*d->compressedChk)(d->compressedChkToken, inb.buf, inb.bufsize);
 
 		} else {
 			ASSERT(d->out->write(d->out, outb.buf, outb.bufsize) == outb.bufsize, "fwrite");
