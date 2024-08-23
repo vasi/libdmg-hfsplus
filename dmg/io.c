@@ -53,8 +53,6 @@ void readBlock(threadData* d, block *inb) {
 	if(d->uncompressedChk)
 		(*d->uncompressedChk)(d->uncompressedChkToken, inb->buf, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
 
-	d->blkx->runs[d->curRun].compLength = 0;
-
 	d->curSector += d->blkx->runs[d->curRun].sectorCount;
 	d->numSectors -= d->blkx->runs[d->curRun].sectorCount;
 	d->curRun++;
@@ -64,6 +62,12 @@ void compressBlock(threadData* d, block *inb, block *outb) {
 	outb->run = inb->run;
 	outb->bufsize = lzfse_encode_buffer(outb->buf, d->bufferSize, inb->buf, inb->bufsize, NULL);
 	ASSERT(outb->bufsize > 0, "compression error");
+
+	if (outb->bufsize > inb->bufsize) {
+		d->blkx->runs[inb->run].type = BLOCK_RAW;
+		memcpy(outb->buf, inb->buf, inb->bufsize);
+		outb->bufsize = inb->bufsize;
+	}
 }
 
 void* threadWorker(void* arg) {
@@ -80,22 +84,11 @@ void* threadWorker(void* arg) {
 		compressBlock(d, &inb, &outb);
 
 		d->blkx->runs[outb.run].compOffset = d->out->tell(d->out) - d->blkx->dataStart;
-		if(outb.bufsize > inb.bufsize) {
-			d->blkx->runs[outb.run].type = BLOCK_RAW;
-			ASSERT(d->out->write(d->out, inb.buf, inb.bufsize) == inb.bufsize, "fwrite");
-			d->blkx->runs[outb.run].compLength += inb.bufsize;
+		ASSERT(d->out->write(d->out, outb.buf, outb.bufsize) == outb.bufsize, "fwrite");
 
-			if(d->compressedChk)
-				(*d->compressedChk)(d->compressedChkToken, inb.buf, inb.bufsize);
-
-		} else {
-			ASSERT(d->out->write(d->out, outb.buf, outb.bufsize) == outb.bufsize, "fwrite");
-
-			if(d->compressedChk)
-				(*d->compressedChk)(d->compressedChkToken, outb.buf, outb.bufsize);
-
-			d->blkx->runs[outb.run].compLength += outb.bufsize;
-		}
+		if(d->compressedChk)
+			(*d->compressedChk)(d->compressedChkToken, outb.buf, outb.bufsize);
+		d->blkx->runs[outb.run].compLength = outb.bufsize;
 	}
 
 	free(inb.buf);
