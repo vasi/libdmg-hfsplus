@@ -4,6 +4,7 @@
 #include <zlib.h>
 #include <lzfse.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #include <dmg/dmg.h>
 #include <dmg/adc.h>
@@ -206,7 +207,8 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 			uint32_t checksumType, ChecksumFunc uncompressedChk_, void* uncompressedChkToken_, ChecksumFunc compressedChk_,
 			void* compressedChkToken_, Volume* volume, int zlibLevel) {
 	threadData td;
-	pthread_t thread1, thread2;
+	size_t i, nthreads;
+	pthread_t *threads;
 	void* ret;
 
 	td.in.in = in_;
@@ -249,14 +251,17 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 
 	td.bufferSize = SECTOR_SIZE * td.out.blkx->decompressBufferRequested;
 
-	ASSERT(pthread_create(&thread1, NULL, &threadWorker, &td) == 0, "thread create");
-	ASSERT(pthread_create(&thread2, NULL, &threadWorker, &td) == 0, "thread create");
+	nthreads = sysconf(_SC_NPROCESSORS_ONLN) + 2; /* input + output */
+	ASSERT(threads = (pthread_t*) malloc(sizeof(pthread_t)), "malloc");
+	for (i = 0; i < nthreads; ++i)
+		ASSERT(pthread_create(&threads[i], NULL, &threadWorker, &td) == 0, "thread create");
 
-	ASSERT(pthread_join(thread1, &ret) == 0, "thread join");
-	ASSERT(ret == NULL, "thread return");
-	ASSERT(pthread_join(thread2, &ret) == 0, "thread join");
-	ASSERT(ret == NULL, "thread return");
+	for (i = 0; i < nthreads; ++i) {
+		ASSERT(pthread_join(threads[i], &ret) == 0, "thread join");
+		ASSERT(ret == NULL, "thread return");
+	}
 	releaseFree(&td.out);
+	free(threads);
 
 	if(td.in.curRun >= td.out.roomForRuns) {
 		td.out.roomForRuns <<= 1;
