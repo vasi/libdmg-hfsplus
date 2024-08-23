@@ -3,6 +3,7 @@
 #include <string.h>
 #include <zlib.h>
 #include <lzfse.h>
+#include <pthread.h>
 
 #include <dmg/dmg.h>
 #include <dmg/adc.h>
@@ -88,6 +89,8 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 			uint32_t checksumType, ChecksumFunc uncompressedChk_, void* uncompressedChkToken_, ChecksumFunc compressedChk_,
 			void* compressedChkToken_, Volume* volume, int zlibLevel) {
 	threadData td;
+	pthread_t thread;
+	void* ret;
 
 	td.out = out_;
 	td.in = in_;
@@ -127,7 +130,9 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	td.curRun = 0;
 	td.curSector = 0;
 
-	ASSERT(threadWorker(&td) == NULL, "worker");
+	ASSERT(pthread_create(&thread, NULL, &threadWorker, &td) == 0, "thread create");
+	ASSERT(pthread_join(thread, &ret) == 0, "thread join");
+	ASSERT(ret == NULL, "thread return");
 
 	if(td.curRun >= td.roomForRuns) {
 		td.roomForRuns <<= 1;
