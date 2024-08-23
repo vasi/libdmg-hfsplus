@@ -59,8 +59,12 @@ static void freeBlock(block* b) {
 	free(b);
 }
 
-static void readBlock(inData* i, block *inb) {
+/* return false if there was nothing to read */
+static bool readBlock(inData* i, block *inb) {
 	size_t datasize;
+
+	if (i->numSectors == 0)
+		return false;
 
 	inb->run.reserved = 0;
 	inb->run.sectorStart = i->curSector;
@@ -77,6 +81,7 @@ static void readBlock(inData* i, block *inb) {
 
 	i->curSector += inb->run.sectorCount;
 	i->numSectors -= inb->run.sectorCount;
+	return true;
 }
 
 static void compressBlock(size_t bufferSize, block *inb, block *outb) {
@@ -162,26 +167,28 @@ static void* threadWorker(void* arg) {
 	threadData* d;
 	block *inb1, *inb2;
 	block *outb1, *outb2;
+	bool got1, got2;
 
 	d = (threadData*)arg;
 	inb1 = allocBlock(d->bufferSize);
 	inb2 = allocBlock(d->bufferSize);
 	outb1 = allocBlock(d->bufferSize);
 	outb2 = allocBlock(d->bufferSize);
+	got1 = got2 = true;
 
-	while(d->in.numSectors > 0) {
-		readBlock(&d->in, inb1);
-		inb2->idx = 0;
-		if (d->in.numSectors)
-			readBlock(&d->in, inb2);
+	while(got2) {
+		got1 = readBlock(&d->in, inb1);
+		got2 = readBlock(&d->in, inb2);
 
-		compressBlock(d->bufferSize, inb1, outb1);
-		if (inb2->idx)
+		if (got2)
 			compressBlock(d->bufferSize, inb2, outb2);
+		if (got1)
+			compressBlock(d->bufferSize, inb1, outb1);
 
-		if (inb2->idx)
+		if (got2)
 			outb2 = finishBlock(d->bufferSize, &d->out, outb2);
-		outb1 = finishBlock(d->bufferSize, &d->out, outb1);
+		if (got1)
+			outb1 = finishBlock(d->bufferSize, &d->out, outb1);
 	}
 
 	freeBlock(inb1);
