@@ -123,7 +123,7 @@ static void addBlockPending(outData* o, block *outb) {
 	*b = outb;
 }
 
-static void writeBlocks(outData* o) {
+static block* writeBlocks(size_t bufferSize, outData* o) {
 	block* b;
 	block* next;
 	for (b = o->pendingBlocks; b && b->idx == o->nextIdx; b = next) {
@@ -132,14 +132,23 @@ static void writeBlocks(outData* o) {
 		++o->nextIdx;
 	}
 	o->pendingBlocks = b;
+
+	/* return a free block */
+	if (o->freeBlocks) {
+		b = o->freeBlocks;
+		o->freeBlocks = b->next;
+	} else {
+		b = allocBlock(bufferSize);
+	}
+	return b;
 }
 
-static void finishBlock(outData* o, block *outb) {
+static block* finishBlock(size_t bufferSize, outData* o, block *outb) {
 	addBlockPending(o, outb);
-	writeBlocks(o);
+	return writeBlocks(bufferSize, o);
 }
 
-static void releaseAll(outData* o) {
+static void releaseFree(outData* o) {
 	block* b;
 	block* next;
 	for (b = o->freeBlocks; b; b = next) {
@@ -157,11 +166,10 @@ static void* threadWorker(void* arg) {
 	d = (threadData*)arg;
 	inb1 = allocBlock(d->bufferSize);
 	inb2 = allocBlock(d->bufferSize);
+	outb1 = allocBlock(d->bufferSize);
+	outb2 = allocBlock(d->bufferSize);
 
 	while(d->in.numSectors > 0) {
-		outb1 = allocBlock(d->bufferSize);
-		outb2 = allocBlock(d->bufferSize);
-
 		readBlock(&d->in, inb1);
 		inb2->idx = 0;
 		if (d->in.numSectors)
@@ -172,14 +180,13 @@ static void* threadWorker(void* arg) {
 			compressBlock(d->bufferSize, inb2, outb2);
 
 		if (inb2->idx)
-			finishBlock(&d->out, outb2);
-		finishBlock(&d->out, outb1);
-
-		releaseAll(&d->out);
+			outb2 = finishBlock(d->bufferSize, &d->out, outb2);
+		outb1 = finishBlock(d->bufferSize, &d->out, outb1);
 	}
 
 	freeBlock(inb1);
 	freeBlock(inb2);
+	releaseFree(&d->out);
 
 	return NULL;
 }
