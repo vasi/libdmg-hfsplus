@@ -42,6 +42,10 @@ off_t fileGetLength(AbstractFile* file) {
 	return length;
 }
 
+int fileEOF(AbstractFile* file) {
+	return feof((FILE*) (file->data));
+}
+
 AbstractFile* createAbstractFileFromFile(FILE* file) {
 	AbstractFile* toReturn;
 
@@ -57,6 +61,7 @@ AbstractFile* createAbstractFileFromFile(FILE* file) {
 	toReturn->tell = ftellWrapper;
 	toReturn->getLength = fileGetLength;
 	toReturn->close = fcloseWrapper;
+	toReturn->eof = fileEOF;
 	toReturn->type = AbstractFileTypeFile;
 	return toReturn;
 }
@@ -79,6 +84,10 @@ off_t dummyTell(AbstractFile* file) {
   return *((off_t*) (file->data));
 }
 
+int dummyEOF(AbstractFile* file) {
+	return 0;
+}
+
 void dummyClose(AbstractFile* file) {
   free(file);
 }
@@ -93,6 +102,7 @@ AbstractFile* createAbstractFileFromDummy() {
 	toReturn->tell = dummyTell;
 	toReturn->getLength = NULL;
 	toReturn->close = dummyClose;
+	toReturn->eof = dummyEOF;
 	toReturn->type = AbstractFileTypeDummy;
 	return toReturn;
 }
@@ -136,6 +146,11 @@ off_t memGetLength(AbstractFile* file) {
   return info->bufferSize;
 }
 
+int memEOF(AbstractFile* file) {
+	MemWrapperInfo* info = (MemWrapperInfo*) (file->data);
+	return info->offset >= info->bufferSize;
+}
+
 void memClose(AbstractFile* file) {
   free(file->data);
   free(file);
@@ -158,6 +173,7 @@ AbstractFile* createAbstractFileFromMemory(void** buffer, size_t size) {
 	toReturn->tell = memTell;
 	toReturn->getLength = memGetLength;
 	toReturn->close = memClose;
+	toReturn->eof = memEOF;
 	toReturn->type = AbstractFileTypeMem;
 	return toReturn;
 }
@@ -256,6 +272,11 @@ off_t memFileGetLength(AbstractFile* file) {
   return *(info->bufferSize);
 }
 
+int memFileEOF(AbstractFile* file) {
+	MemFileWrapperInfo* info = (MemFileWrapperInfo*) (file->data);
+	return info->offset >= *(info->bufferSize);
+}
+
 void memFileClose(AbstractFile* file) {
   free(file->data);
   free(file);
@@ -282,6 +303,7 @@ AbstractFile* createAbstractFileFromMemoryFile(void** buffer, size_t* size) {
 	toReturn->tell = memFileTell;
 	toReturn->getLength = memFileGetLength;
 	toReturn->close = memFileClose;
+	toReturn->eof = memFileEOF;
 	toReturn->type = AbstractFileTypeMemFile;
 	return toReturn;
 }
