@@ -70,26 +70,34 @@ static bool readBlock(inData* i, block *inb) {
 
 	ASSERT(pthread_mutex_lock(&i->mut) == 0, "mutex lock");
 
-	if (i->sectorsRemain == 0) {
+	if (!i->useEOF && i->sectorsRemain == 0) {
+		ASSERT(pthread_mutex_unlock(&i->mut) == 0, "mutex unlock");
+		return false;
+	}
+
+	datasize = SECTORS_AT_A_TIME * SECTOR_SIZE;
+	inb->bufsize = i->in->read(i->in, inb->buf, SECTORS_AT_A_TIME * SECTOR_SIZE);
+	if (inb->bufsize < datasize) {
+		ASSERT(i->useEOF && i->in->eof(i->in), "eof");
+	}
+	if (inb->bufsize == 0) {
 		ASSERT(pthread_mutex_unlock(&i->mut) == 0, "mutex unlock");
 		return false;
 	}
 
 	inb->run.reserved = 0;
 	inb->run.sectorStart = i->curSector;
-	inb->run.sectorCount = (i->sectorsRemain > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : i->sectorsRemain;
 	inb->idx = i->curRun++;
+	inb->run.sectorCount = inb->bufsize / SECTOR_SIZE;
 
-	// printf("run %d: sectors=%" PRId64 ", left=%d\n", inb->idx, inb->run.sectorCount, i->numSectors);
-
-	datasize = inb->run.sectorCount * SECTOR_SIZE;
-	ASSERT((inb->bufsize = i->in->read(i->in, inb->buf, datasize)) == datasize, "mRead");
+	// printf("run %d: sectors=%" PRId64 ", left=%d\n", inb->idx, inb->run.sectorCount, i->sectorsRemain);
 
 	if(i->uncompressedChk)
 		(*i->uncompressedChk)(i->uncompressedChkToken, inb->buf, inb->bufsize);
 
 	i->curSector += inb->run.sectorCount;
-	i->sectorsRemain -= inb->run.sectorCount;
+	if (!i->useEOF)
+		i->sectorsRemain -= inb->run.sectorCount;
 
 	ASSERT(pthread_mutex_unlock(&i->mut) == 0, "mutex unlock");
 	return true;
@@ -190,7 +198,7 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	void* ret;
 
 	td.in.in = in_;
-	td.in.useEOF = false;
+	td.in.useEOF = (numSectors_ == 0);
 	td.in.sectorsRemain = numSectors_;
 	td.in.uncompressedChk = uncompressedChk_;
 	td.in.uncompressedChkToken = uncompressedChkToken_;
