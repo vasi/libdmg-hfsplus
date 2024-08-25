@@ -25,7 +25,8 @@ typedef struct {
 	pthread_mutex_t mut;
 
 	AbstractFile* in;
-	uint32_t numSectors;
+	bool useEOF;
+	uint32_t sectorsRemain;
 	ChecksumFunc uncompressedChk;
 	void* uncompressedChkToken;
 	uint32_t curRun;
@@ -69,14 +70,14 @@ static bool readBlock(inData* i, block *inb) {
 
 	ASSERT(pthread_mutex_lock(&i->mut) == 0, "mutex lock");
 
-	if (i->numSectors == 0) {
+	if (i->sectorsRemain == 0) {
 		ASSERT(pthread_mutex_unlock(&i->mut) == 0, "mutex unlock");
 		return false;
 	}
 
 	inb->run.reserved = 0;
 	inb->run.sectorStart = i->curSector;
-	inb->run.sectorCount = (i->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : i->numSectors;
+	inb->run.sectorCount = (i->sectorsRemain > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : i->sectorsRemain;
 	inb->idx = i->curRun++;
 
 	// printf("run %d: sectors=%" PRId64 ", left=%d\n", inb->idx, inb->run.sectorCount, i->numSectors);
@@ -88,7 +89,7 @@ static bool readBlock(inData* i, block *inb) {
 		(*i->uncompressedChk)(i->uncompressedChkToken, inb->buf, inb->bufsize);
 
 	i->curSector += inb->run.sectorCount;
-	i->numSectors -= inb->run.sectorCount;
+	i->sectorsRemain -= inb->run.sectorCount;
 
 	ASSERT(pthread_mutex_unlock(&i->mut) == 0, "mutex unlock");
 	return true;
@@ -189,7 +190,8 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	void* ret;
 
 	td.in.in = in_;
-	td.in.numSectors = numSectors_;
+	td.in.useEOF = false;
+	td.in.sectorsRemain = numSectors_;
 	td.in.uncompressedChk = uncompressedChk_;
 	td.in.uncompressedChkToken = uncompressedChkToken_;
 	td.in.curRun = 0;
@@ -210,7 +212,6 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	td.out.blkx->fUDIFBlocksSignature = UDIF_BLOCK_SIGNATURE;
 	td.out.blkx->infoVersion = 1;
 	td.out.blkx->firstSectorNumber = firstSectorNumber;
-	td.out.blkx->sectorCount = td.in.numSectors;
 	td.out.blkx->dataStart = 0;
 	td.out.blkx->decompressBufferRequested = SECTORS_AT_A_TIME + 8;
 	td.out.blkx->blocksDescriptor = blocksDescriptor;
@@ -250,6 +251,7 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	td.out.blkx->runs[td.in.curRun].compOffset = td.out.out->tell(td.out.out) - td.out.blkx->dataStart;
 	td.out.blkx->runs[td.in.curRun].compLength = 0;
 	td.out.blkx->blocksRunCount = td.in.curRun + 1;
+	td.out.blkx->sectorCount = td.in.curSector;
 
 	return td.out.blkx;
 }
