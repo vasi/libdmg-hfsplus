@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdint.h>
+#include <errno.h>
 
 #include "abstractfile.h"
 #include "common.h"
@@ -327,5 +328,65 @@ AbstractFile* createAbstractFileFromMemoryFileBuffer(void** buffer, size_t* size
 	toReturn->getLength = memFileGetLength;
 	toReturn->close = memFileClose;
 	toReturn->type = AbstractFileTypeMemFile;
+	return toReturn;
+}
+
+typedef struct {
+	FILE* file;
+
+	/* Buffer of data to simulate seeks */
+	size_t bufsize;
+	void* buf;
+	size_t idx;
+} PipeInfo;
+
+size_t pipeRead(AbstractFile* file, void* data, size_t len) {
+  return fread(data, 1, len, (FILE*) (file->data));
+}
+
+size_t pipeWrite(AbstractFile* file, const void* data, size_t len) {
+	return -1; // TODO
+}
+
+int pipeSeek(AbstractFile* file, off_t offset) {
+	return -1; // TODO
+}
+
+off_t pipeTell(AbstractFile* file) {
+	return -1; // TODO
+}
+
+void pipeClose(AbstractFile* file) {
+	return; // TODO
+}
+
+off_t pipeGetLength(AbstractFile* file) {
+	return -1; // TODO
+}
+
+int pipeEOF(AbstractFile* file) {
+	return -1; // TODO
+}
+
+AbstractFile* createAbstractFileFromPipe(FILE* file, size_t bufferSize) {
+	AbstractFile* toReturn;
+	PipeInfo* info;
+
+	if(file == NULL) {
+		return NULL;
+	}
+
+	info = (PipeInfo*) malloc(sizeof(PipeInfo));
+
+	toReturn = (AbstractFile*) malloc(sizeof(AbstractFile));
+	toReturn->data = info;
+	toReturn->read = pipeRead;
+	toReturn->write = pipeWrite;
+	toReturn->seek = pipeSeek;
+	toReturn->tell = pipeTell;
+	toReturn->getLength = pipeGetLength;
+	toReturn->close = pipeClose;
+	toReturn->eof = pipeEOF;
+	toReturn->type = AbstractFileTypePipe;
 	return toReturn;
 }

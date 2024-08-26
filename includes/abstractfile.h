@@ -25,7 +25,8 @@ typedef enum AbstractFileType {
 	AbstractFileTypeIBootIM,
 	AbstractFileTypeMem,
 	AbstractFileTypeMemFile,
-	AbstractFileTypeDummy
+	AbstractFileTypeDummy,
+	AbstractFileTypePipe
 } AbstractFileType;
 
 struct AbstractFile {
