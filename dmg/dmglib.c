@@ -13,7 +13,7 @@ int extractDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, int partNum)
 	ResourceData* blkxData;
 
 	fileLength = abstractIn->getLength(abstractIn);
-	abstractIn->seek(abstractIn, fileLength - sizeof(UDIFResourceFile));
+	ASSERT(abstractIn->seek(abstractIn, fileLength - sizeof(UDIFResourceFile)) == 0, "seek");
 	readUDIFResourceFile(abstractIn, &resourceFile);
 	resources = readResources(abstractIn, &resourceFile);
 
@@ -145,7 +145,7 @@ int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, int zlibLevel)
 
 	printf("Writing main data blkx...\n"); fflush(stdout);
 
-	abstractIn->seek(abstractIn, 0);
+	ASSERT(abstractIn->seek(abstractIn, 0) == 0, "seek");
 	blkx = insertBLKX(abstractOut, abstractIn, USER_OFFSET, (volumeHeader->totalBlocks * volumeHeader->blockSize)/SECTOR_SIZE,
 				2, CHECKSUM_CRC32, &BlockSHA1CRC, &uncompressedToken, &CRCProxy, &dataForkToken, volume, zlibLevel);
 
@@ -306,7 +306,7 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut, int zlibLe
 
 	printf("Processing DDM...\n"); fflush(stdout);
 	DDM = (DriverDescriptorRecord*) malloc(SECTOR_SIZE);
-	abstractIn->seek(abstractIn, 0);
+	ASSERT(abstractIn->seek(abstractIn, 0) == 0, "seek")
 	ASSERT(abstractIn->read(abstractIn, DDM, SECTOR_SIZE) == SECTOR_SIZE, "fread");
 	flipDriverDescriptorRecord(DDM, FALSE);
 
@@ -317,14 +317,14 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut, int zlibLe
 
 		printf("Processing partition map...\n"); fflush(stdout);
 
-		abstractIn->seek(abstractIn, BlockSize);
+		ASSERT(abstractIn->seek(abstractIn, BlockSize) == 0, "seek");
 		ASSERT(abstractIn->read(abstractIn, partitions, BlockSize) == BlockSize, "fread");
 		flipPartitionMultiple(partitions, FALSE, FALSE, BlockSize);
 
 		partitionTableSize = BlockSize * partitions->pmMapBlkCnt;
 		partitions = (Partition*) realloc(partitions, partitionTableSize);
 
-		abstractIn->seek(abstractIn, BlockSize);
+		ASSERT(abstractIn->seek(abstractIn, BlockSize) == 0, "seek");
 		ASSERT(abstractIn->read(abstractIn, partitions, partitionTableSize) == partitionTableSize, "fread");
 		flipPartition(partitions, FALSE, BlockSize);
 
@@ -341,7 +341,7 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut, int zlibLe
 
 			memset(&uncompressedToken, 0, sizeof(uncompressedToken));
 
-			abstractIn->seek(abstractIn, partitions[i].pmPyPartStart * BlockSize);
+			ASSERT(abstractIn->seek(abstractIn, partitions[i].pmPyPartStart * BlockSize) == 0, "seek");
 			blkx = insertBLKX(abstractOut, abstractIn, partitions[i].pmPyPartStart, partitions[i].pmPartBlkCnt, i, CHECKSUM_CRC32,
 						&BlockCRC, &uncompressedToken, &CRCProxy, &dataForkToken, NULL, zlibLevel);
 
@@ -380,7 +380,7 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut, int zlibLe
 
 		memset(&uncompressedToken, 0, sizeof(uncompressedToken));
 
-		abstractIn->seek(abstractIn, 0);
+		ASSERT(abstractIn->seek(abstractIn, 0) == 0, "seek");
 		blkx = insertBLKX(abstractOut, abstractIn, 0, 0, ENTIRE_DEVICE_DESCRIPTOR, CHECKSUM_CRC32,
 					&BlockCRC, &uncompressedToken, &CRCProxy, &dataForkToken, NULL, zlibLevel);
 		blkx->checksum.data[0] = uncompressedToken.crc;
@@ -489,7 +489,7 @@ int convertToISO(AbstractFile* abstractIn, AbstractFile* abstractOut) {
 	BLKXTable* blkxTable;
 
 	fileLength = abstractIn->getLength(abstractIn);
-	abstractIn->seek(abstractIn, fileLength - sizeof(UDIFResourceFile));
+	ASSERT(abstractIn->seek(abstractIn, fileLength - sizeof(UDIFResourceFile)) == 0, "seek")
 	readUDIFResourceFile(abstractIn, &resourceFile);
 	resources = readResources(abstractIn, &resourceFile);
 
@@ -499,7 +499,7 @@ int convertToISO(AbstractFile* abstractIn, AbstractFile* abstractOut) {
 
 	while(blkx != NULL) {
 		blkxTable = (BLKXTable*)(blkx->data);
-		abstractOut->seek(abstractOut, blkxTable->firstSectorNumber * 512);
+		ASSERT(abstractOut->seek(abstractOut, blkxTable->firstSectorNumber * 512) == 0, "seek");
 		extractBLKX(abstractIn, abstractOut, blkxTable);
 		blkx = blkx->next;
 	}
