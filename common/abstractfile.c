@@ -47,11 +47,20 @@ int fileEOF(AbstractFile* file) {
 	return feof((FILE*) (file->data));
 }
 
+int isPipe(FILE* file) {
+	int ret = fseeko(file, 0, SEEK_CUR);
+	return (ret != 0);
+}
+
 AbstractFile* createAbstractFileFromFile(FILE* file) {
 	AbstractFile* toReturn;
 
 	if(file == NULL) {
 		return NULL;
+	}
+
+	if (isPipe(file)) {
+		return createAbstractFileFromPipe(file, 0);
 	}
 
 	toReturn = (AbstractFile*) malloc(sizeof(AbstractFile));
@@ -333,39 +342,50 @@ AbstractFile* createAbstractFileFromMemoryFileBuffer(void** buffer, size_t* size
 
 typedef struct {
 	FILE* file;
-
-	/* Buffer of data to simulate seeks */
-	size_t bufsize;
-	void* buf;
-	size_t idx;
+	off_t offset;
 } PipeInfo;
 
 size_t pipeRead(AbstractFile* file, void* data, size_t len) {
-  return fread(data, 1, len, (FILE*) (file->data));
+	PipeInfo* info = (PipeInfo*) (file->data);
+  size_t ret = fread(data, 1, len, info->file);
+	info->offset += ret;
+	return ret;
 }
 
 size_t pipeWrite(AbstractFile* file, const void* data, size_t len) {
-	return -1; // TODO
+	ASSERT(0, "pipe write");
+	return 0;
 }
 
 int pipeSeek(AbstractFile* file, off_t offset) {
-	return -1; // TODO
+	int ret;
+	PipeInfo* info = (PipeInfo*) (file->data);
+	fprintf(stderr, "seek %ld -> %ld\n", info->offset, offset);
+	ret = fseeko(info->file, offset, SEEK_SET);
+	info->offset = offset;
+	return ret;
 }
 
 off_t pipeTell(AbstractFile* file) {
-	return -1; // TODO
+	PipeInfo* info = (PipeInfo*) (file->data);
+	return ftello(info->file);
 }
 
 void pipeClose(AbstractFile* file) {
-	return; // TODO
+	PipeInfo* info = (PipeInfo*) (file->data);
+	fclose(info->file);
+	free(info);
+	free(file);
 }
 
 off_t pipeGetLength(AbstractFile* file) {
-	return -1; // TODO
+	ASSERT(0, "pipe length");
+	return -1;
 }
 
 int pipeEOF(AbstractFile* file) {
-	return -1; // TODO
+	PipeInfo* info = (PipeInfo*) (file->data);
+	return feof(info->file);
 }
 
 AbstractFile* createAbstractFileFromPipe(FILE* file, size_t bufferSize) {
@@ -377,6 +397,8 @@ AbstractFile* createAbstractFileFromPipe(FILE* file, size_t bufferSize) {
 	}
 
 	info = (PipeInfo*) malloc(sizeof(PipeInfo));
+	info->file = file;
+	info->offset = 0;
 
 	toReturn = (AbstractFile*) malloc(sizeof(AbstractFile));
 	toReturn->data = info;

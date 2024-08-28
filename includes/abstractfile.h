@@ -68,6 +68,7 @@ extern "C" {
 	AbstractFile* createAbstractFileFromMemory(void** buffer, size_t size);
 	AbstractFile* createAbstractFileFromMemoryFile(void** buffer, size_t* size);
 	AbstractFile* createAbstractFileFromMemoryFileBuffer(void** buffer, size_t* size, size_t actualBufferSize);
+	AbstractFile* createAbstractFileFromPipe(FILE* file, size_t bufferSize);
 	void abstractFilePrint(AbstractFile* file, const char* format, ...);
 	io_func* IOFuncFromAbstractFile(AbstractFile* file);
 #ifdef __cplusplus

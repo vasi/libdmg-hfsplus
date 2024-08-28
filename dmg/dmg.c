@@ -17,7 +17,7 @@ void TestByteOrder()
 }
 
 int buildInOut(const char* source, const char* dest, AbstractFile** in, AbstractFile** out) {
-	*in = createAbstractFileFromFile(fopen(source, "rb"));
+	*in = createAbstractFileFromPipe(fopen(source, "rb"), 0);
 	if(!(*in)) {
 		printf("cannot open source: %s\n", source);
 		return FALSE;
