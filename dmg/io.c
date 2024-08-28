@@ -237,7 +237,7 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	td.bufferSize = SECTOR_SIZE * td.out.blkx->decompressBufferRequested;
 
 	nthreads = sysconf(_SC_NPROCESSORS_ONLN) + 2; /* input + output */
-	ASSERT(threads = (pthread_t*) malloc(sizeof(pthread_t)), "malloc");
+	ASSERT(threads = (pthread_t*) malloc(nthreads * sizeof(pthread_t)), "malloc");
 	for (i = 0; i < nthreads; ++i)
 		ASSERT(pthread_create(&threads[i], NULL, &threadWorker, &td) == 0, "thread create");
 
