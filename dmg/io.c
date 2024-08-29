@@ -66,7 +66,7 @@ static void freeBlock(block* b) {
 
 /* return false if there was nothing to read */
 static bool readBlock(inData* i, block *inb) {
-	size_t datasize;
+	size_t sectors, datasize;
 
 	ASSERT(pthread_mutex_lock(&i->mut) == 0, "mutex lock");
 
@@ -75,8 +75,9 @@ static bool readBlock(inData* i, block *inb) {
 		return false;
 	}
 
-	datasize = SECTORS_AT_A_TIME * SECTOR_SIZE;
-	inb->bufsize = i->in->read(i->in, inb->buf, SECTORS_AT_A_TIME * SECTOR_SIZE);
+	sectors = (i->sectorsRemain != 0 && i->sectorsRemain < SECTORS_AT_A_TIME) ? i->sectorsRemain : SECTORS_AT_A_TIME;
+	datasize = sectors * SECTOR_SIZE;
+	inb->bufsize = i->in->read(i->in, inb->buf, datasize);
 	if (inb->bufsize < datasize) {
 		ASSERT(i->useEOF && i->in->eof(i->in), "eof");
 	}
