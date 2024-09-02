@@ -27,6 +27,16 @@ void CRCProxy(void* token, const unsigned char* data, size_t len) {
   CRC32Checksum(&(ckSumToken->crc), data, len);
 }
 
+ChecksumAlgo BlockSHA1CRCAlgo = {
+  .serial = BlockSHA1CRC,
+};
+ChecksumAlgo BlockCRCAlgo = {
+  .serial = BlockCRC,
+};
+ChecksumAlgo CRCProxyAlgo = {
+  .serial = CRCProxy,
+};
+
 /*
  *
  * MediaKit block checksumming reverse-engineered from Leopard MediaKit framework

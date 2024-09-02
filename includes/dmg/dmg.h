@@ -224,6 +224,10 @@ typedef struct ResourceData {
 typedef void (*FlipDataFunc)(unsigned char* data, char out);
 typedef void (*ChecksumFunc)(void* ckSum, const unsigned char* data, size_t len);
 
+typedef struct ChecksumAlgo {
+	ChecksumFunc serial; /* checksum a section serially */
+} ChecksumAlgo;
+
 typedef struct ResourceKey {
 	unsigned char* key;
 	ResourceData* data;
@@ -284,6 +288,8 @@ extern "C" {
 	void BlockSHA1CRC(void* token, const unsigned char* data, size_t len);
 	void BlockCRC(void* token, const unsigned char* data, size_t len);
 	void CRCProxy(void* token, const unsigned char* data, size_t len);
+
+	extern ChecksumAlgo BlockSHA1CRCAlgo, BlockCRCAlgo, CRCProxyAlgo;
 
 	void SHA1Transform(unsigned long state[5], const unsigned char buffer[64]);
 	void SHA1Init(SHA1_CTX* context);
