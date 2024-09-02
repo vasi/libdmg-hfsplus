@@ -290,6 +290,7 @@ extern "C" {
 	void CRCProxy(void* token, const unsigned char* data, size_t len);
 
 	extern ChecksumAlgo BlockSHA1CRCAlgo, BlockCRCAlgo, CRCProxyAlgo;
+	ChecksumFunc AlgoToFunc(const ChecksumAlgo* algo);
 
 	void SHA1Transform(unsigned long state[5], const unsigned char buffer[64]);
 	void SHA1Init(SHA1_CTX* context);
