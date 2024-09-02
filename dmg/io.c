@@ -27,7 +27,7 @@ typedef struct {
 	AbstractFile* in;
 	bool useEOF;
 	uint32_t sectorsRemain;
-	ChecksumFunc uncompressedChk;
+	const ChecksumAlgo* uncompressedChk;
 	void* uncompressedChkToken;
 	uint32_t curRun;
 	uint64_t curSector;
@@ -37,7 +37,7 @@ typedef struct {
 	pthread_mutex_t mut;
 
 	AbstractFile* out;
-	ChecksumFunc compressedChk;
+	const ChecksumAlgo* compressedChk;
 	void* compressedChkToken;
 	BLKXTable* blkx;
 	uint32_t roomForRuns;
@@ -94,7 +94,7 @@ static bool readBlock(inData* i, block *inb) {
 	// printf("run %d: sectors=%" PRId64 ", left=%d\n", inb->idx, inb->run.sectorCount, i->sectorsRemain);
 
 	if(i->uncompressedChk)
-		(*i->uncompressedChk)(i->uncompressedChkToken, inb->buf, inb->bufsize);
+		i->uncompressedChk->serial(i->uncompressedChkToken, inb->buf, inb->bufsize);
 
 	i->curSector += inb->run.sectorCount;
 	if (!i->useEOF)
@@ -133,7 +133,7 @@ static void writeBlock(outData* o, block *outb) {
 	ASSERT(o->out->write(o->out, outb->buf, outb->bufsize) == outb->bufsize, "fwrite");
 
 	if(o->compressedChk)
-		(*o->compressedChk)(o->compressedChkToken, outb->buf, outb->bufsize);
+		o->compressedChk->serial(o->compressedChkToken, outb->buf, outb->bufsize);
 }
 
 static void addBlockPending(outData* o, block *outb) {
@@ -190,13 +190,6 @@ static void* threadWorker(void* arg) {
 	return NULL;
 }
 
-ChecksumFunc AlgoToFunc(const ChecksumAlgo* algo) {
-  if (algo)
-    return algo->serial;
-  else
-    return NULL;
-}
-
 BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSectorNumber, uint32_t numSectors_, uint32_t blocksDescriptor,
 			uint32_t checksumType, const ChecksumAlgo* uncompressedChk_, void* uncompressedChkToken_, const ChecksumAlgo* compressedChk_,
 			void* compressedChkToken_, Volume* volume, int zlibLevel) {
@@ -208,14 +201,14 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	td.in.in = in_;
 	td.in.useEOF = (numSectors_ == 0);
 	td.in.sectorsRemain = numSectors_;
-	td.in.uncompressedChk = AlgoToFunc(uncompressedChk_);
+	td.in.uncompressedChk = uncompressedChk_;
 	td.in.uncompressedChkToken = uncompressedChkToken_;
 	td.in.curRun = 0;
 	td.in.curSector = 0;
 	pthread_mutex_init(&td.in.mut, NULL);
 
 	td.out.out = out_;
-	td.out.compressedChk = AlgoToFunc(compressedChk_);
+	td.out.compressedChk = compressedChk_;
 	td.out.compressedChkToken = compressedChkToken_;
 	td.out.nextIdx = 0;
 	td.out.pendingBlocks = NULL;
