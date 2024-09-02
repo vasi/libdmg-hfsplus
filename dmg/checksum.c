@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <zlib.h>
 
 #include <dmg/dmg.h>
 
@@ -129,29 +130,7 @@ static uint64_t crc_table[256] = {
 /* ========================================================================= */
 uint32_t CRC32Checksum(uint32_t* ckSum, const unsigned char *buf, size_t len)
 {
-  uint32_t crc;
-
-  crc = *ckSum;
-
-  if (buf == NULL) return crc;
-
-  crc = crc ^ 0xffffffffL;
-  while (len >= 8)
-  {
-    DO8(buf);
-    len -= 8;
-  }
-  if (len)
-  {
-    do {
-DO1(buf);
-    } while (--len);
-  }
-
-  crc = crc ^ 0xffffffffL;
-
-  *ckSum = crc;
-  return crc;
+  return (*ckSum = crc32_z(*ckSum, buf, len));
 }
 
 /*
