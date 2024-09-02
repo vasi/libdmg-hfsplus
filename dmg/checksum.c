@@ -27,14 +27,6 @@ void CRCProxy(void* token, const unsigned char* data, size_t len) {
   CRC32Checksum(&(ckSumToken->crc), data, len);
 }
 
-
-ChecksumFunc AlgoToFunc(const ChecksumAlgo* algo) {
-  if (algo)
-    return algo->serial;
-  else
-    return NULL;
-}
-
 ChecksumAlgo BlockSHA1CRCAlgo = {
   .serial = BlockSHA1CRC,
 };

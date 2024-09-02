@@ -290,7 +290,6 @@ extern "C" {
 	void CRCProxy(void* token, const unsigned char* data, size_t len);
 
 	extern ChecksumAlgo BlockSHA1CRCAlgo, BlockCRCAlgo, CRCProxyAlgo;
-	ChecksumFunc AlgoToFunc(const ChecksumAlgo* algo);
 
 	void SHA1Transform(unsigned long state[5], const unsigned char buffer[64]);
 	void SHA1Init(SHA1_CTX* context);
@@ -337,7 +336,7 @@ extern "C" {
 
 	void extractBLKX(AbstractFile* in, AbstractFile* out, BLKXTable* blkx);
 	BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorNumber, uint32_t numSectors, uint32_t blocksDescriptor,
-				uint32_t checksumType, ChecksumFunc uncompressedChk, void* uncompressedChkToken, ChecksumFunc compressedChk,
+				uint32_t checksumType, const ChecksumAlgo* uncompressedChk, void* uncompressedChkToken, const ChecksumAlgo* compressedChk,
 				void* compressedChkToken, Volume* volume, int zlibLevel);
 
 

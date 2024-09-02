@@ -190,8 +190,15 @@ static void* threadWorker(void* arg) {
 	return NULL;
 }
 
+ChecksumFunc AlgoToFunc(const ChecksumAlgo* algo) {
+  if (algo)
+    return algo->serial;
+  else
+    return NULL;
+}
+
 BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSectorNumber, uint32_t numSectors_, uint32_t blocksDescriptor,
-			uint32_t checksumType, ChecksumFunc uncompressedChk_, void* uncompressedChkToken_, ChecksumFunc compressedChk_,
+			uint32_t checksumType, const ChecksumAlgo* uncompressedChk_, void* uncompressedChkToken_, const ChecksumAlgo* compressedChk_,
 			void* compressedChkToken_, Volume* volume, int zlibLevel) {
 	threadData td;
 	size_t i, nthreads;
@@ -201,14 +208,14 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	td.in.in = in_;
 	td.in.useEOF = (numSectors_ == 0);
 	td.in.sectorsRemain = numSectors_;
-	td.in.uncompressedChk = uncompressedChk_;
+	td.in.uncompressedChk = AlgoToFunc(uncompressedChk_);
 	td.in.uncompressedChkToken = uncompressedChkToken_;
 	td.in.curRun = 0;
 	td.in.curSector = 0;
 	pthread_mutex_init(&td.in.mut, NULL);
 
 	td.out.out = out_;
-	td.out.compressedChk = compressedChk_;
+	td.out.compressedChk = AlgoToFunc(compressedChk_);
 	td.out.compressedChkToken = compressedChkToken_;
 	td.out.nextIdx = 0;
 	td.out.pendingBlocks = NULL;

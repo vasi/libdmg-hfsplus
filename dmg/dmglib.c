@@ -147,7 +147,7 @@ int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, int zlibLevel)
 
 	ASSERT(abstractIn->seek(abstractIn, 0) == 0, "seek");
 	blkx = insertBLKX(abstractOut, abstractIn, USER_OFFSET, (volumeHeader->totalBlocks * volumeHeader->blockSize)/SECTOR_SIZE,
-				2, CHECKSUM_CRC32, &BlockSHA1CRC, &uncompressedToken, &CRCProxy, &dataForkToken, volume, zlibLevel);
+				2, CHECKSUM_CRC32, &BlockSHA1CRCAlgo, &uncompressedToken, &CRCProxyAlgo, &dataForkToken, volume, zlibLevel);
 
 	blkx->checksum.data[0] = uncompressedToken.crc;
 	printf("Inserting main blkx...\n"); fflush(stdout);
@@ -343,7 +343,7 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut, int zlibLe
 
 			ASSERT(abstractIn->seek(abstractIn, partitions[i].pmPyPartStart * BlockSize) == 0, "seek");
 			blkx = insertBLKX(abstractOut, abstractIn, partitions[i].pmPyPartStart, partitions[i].pmPartBlkCnt, i, CHECKSUM_CRC32,
-						&BlockCRC, &uncompressedToken, &CRCProxy, &dataForkToken, NULL, zlibLevel);
+						&BlockCRCAlgo, &uncompressedToken, &CRCProxyAlgo, &dataForkToken, NULL, zlibLevel);
 
 			blkx->checksum.data[0] = uncompressedToken.crc;
 			resources = insertData(resources, "blkx", i, partitionName, (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
@@ -382,7 +382,7 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut, int zlibLe
 
 		ASSERT(abstractIn->seek(abstractIn, 0) == 0, "seek");
 		blkx = insertBLKX(abstractOut, abstractIn, 0, 0, ENTIRE_DEVICE_DESCRIPTOR, CHECKSUM_CRC32,
-					&BlockCRC, &uncompressedToken, &CRCProxy, &dataForkToken, NULL, zlibLevel);
+					&BlockCRCAlgo, &uncompressedToken, &CRCProxyAlgo, &dataForkToken, NULL, zlibLevel);
 		blkx->checksum.data[0] = uncompressedToken.crc;
 		resources = insertData(resources, "blkx", 0, "whole disk (unknown partition : 0)", (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
 		free(blkx);
