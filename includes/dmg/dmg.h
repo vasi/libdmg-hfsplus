@@ -328,11 +328,11 @@ extern "C" {
 
 	void readDriverDescriptorMap(AbstractFile* file, ResourceKey* resources);
 	DriverDescriptorRecord* createDriverDescriptorMap(uint32_t numSectors);
-	void writeDriverDescriptorMap(AbstractFile* file, DriverDescriptorRecord* DDM, ChecksumFunc dataForkChecksum, void* dataForkToken, ResourceKey **resources, int zlibLevel);
+	void writeDriverDescriptorMap(AbstractFile* file, DriverDescriptorRecord* DDM, const ChecksumAlgo* dataForkChecksum, void* dataForkToken, ResourceKey **resources, int zlibLevel);
 	void readApplePartitionMap(AbstractFile* file, ResourceKey* resources, unsigned int BlockSize);
 	Partition* createApplePartitionMap(uint32_t numSectors, const char* volumeType);
-	void writeApplePartitionMap(AbstractFile* file, Partition* partitions, ChecksumFunc dataForkChecksum, void* dataForkToken, ResourceKey **resources, NSizResource** nsizIn, int zlibLevel);
-	void writeATAPI(AbstractFile* file,  ChecksumFunc dataForkChecksum, void* dataForkToken, ResourceKey **resources, NSizResource** nsizIn, int zlibLevel);
+	void writeApplePartitionMap(AbstractFile* file, Partition* partitions, const ChecksumAlgo* dataForkChecksum, void* dataForkToken, ResourceKey **resources, NSizResource** nsizIn, int zlibLevel);
+	void writeATAPI(AbstractFile* file, const ChecksumAlgo* dataForkChecksum, void* dataForkToken, ResourceKey **resources, NSizResource** nsizIn, int zlibLevel);
 	void writeFreePartition(AbstractFile* outFile, uint32_t numSectors, ResourceKey** resources);
 
 	void extractBLKX(AbstractFile* in, AbstractFile* out, BLKXTable* blkx);

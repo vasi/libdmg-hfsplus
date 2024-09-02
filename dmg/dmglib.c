@@ -134,11 +134,11 @@ int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, int zlibLevel)
 
 	partitions = createApplePartitionMap((volumeHeader->totalBlocks * volumeHeader->blockSize)/SECTOR_SIZE, HFSX_VOLUME_TYPE);
 
-	writeDriverDescriptorMap(abstractOut, DDM, &CRCProxy, (void*) (&dataForkToken), &resources, zlibLevel);
+	writeDriverDescriptorMap(abstractOut, DDM, &CRCProxyAlgo, (void*) (&dataForkToken), &resources, zlibLevel);
 	free(DDM);
-	writeApplePartitionMap(abstractOut, partitions, &CRCProxy, (void*) (&dataForkToken), &resources, &nsiz, zlibLevel);
+	writeApplePartitionMap(abstractOut, partitions, &CRCProxyAlgo, (void*) (&dataForkToken), &resources, &nsiz, zlibLevel);
 	free(partitions);
-	writeATAPI(abstractOut, &CRCProxy, (void*) (&dataForkToken), &resources, &nsiz, zlibLevel);
+	writeATAPI(abstractOut, &CRCProxyAlgo, (void*) (&dataForkToken), &resources, &nsiz, zlibLevel);
 
 	memset(&uncompressedToken, 0, sizeof(uncompressedToken));
 	SHA1Init(&(uncompressedToken.sha1));
@@ -312,7 +312,7 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut, int zlibLe
 
 	if(DDM->sbSig == DRIVER_DESCRIPTOR_SIGNATURE) {
 		BlockSize = DDM->sbBlkSize;
-		writeDriverDescriptorMap(abstractOut, DDM, &CRCProxy, (void*) (&dataForkToken), &resources, zlibLevel);
+		writeDriverDescriptorMap(abstractOut, DDM, &CRCProxyAlgo, (void*) (&dataForkToken), &resources, zlibLevel);
 		free(DDM);
 
 		printf("Processing partition map...\n"); fflush(stdout);
