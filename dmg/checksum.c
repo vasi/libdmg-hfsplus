@@ -5,36 +5,53 @@
 
 #include <dmg/dmg.h>
 
-void BlockSHA1CRC(void* token, const unsigned char* data, size_t len) {
+void CRCChunk(void *token, const unsigned char *data, size_t len) {
+  ChecksumToken* ckSumToken;
+  ckSumToken = (ChecksumToken*) token;
+  CRC32Checksum(&(ckSumToken->crc), data, len);
+  ckSumToken->crclen += len;
+}
+
+void BlockSHA1CRCSerial(void* token, const unsigned char* data, size_t len) {
   ChecksumToken* ckSumToken;
   ckSumToken = (ChecksumToken*) token;
   MKBlockChecksum(&(ckSumToken->block), data, len);
-  CRC32Checksum(&(ckSumToken->crc), data, len);
   SHA1Update(&(ckSumToken->sha1), data, len);
 }
 
-void BlockCRC(void* token, const unsigned char* data, size_t len) {
+void BlockCRCSerial(void* token, const unsigned char* data, size_t len) {
   ChecksumToken* ckSumToken;
   ckSumToken = (ChecksumToken*) token;
   MKBlockChecksum(&(ckSumToken->block), data, len);
-  CRC32Checksum(&(ckSumToken->crc), data, len);
 }
 
+void CRCSerial(void* token, const unsigned char* data, size_t len) {
+  return;
+}
 
-void CRCProxy(void* token, const unsigned char* data, size_t len) {
-  ChecksumToken* ckSumToken;
-  ckSumToken = (ChecksumToken*) token;
-  CRC32Checksum(&(ckSumToken->crc), data, len);
+void CRCCombine(void* destToken, void* chunkToken) {
+  ChecksumToken* destCkSumToken;
+  ChecksumToken* chunkCkSumToken;
+  destCkSumToken = (ChecksumToken*) destToken;
+  chunkCkSumToken = (ChecksumToken*) chunkToken;
+  destCkSumToken->crc = crc32_combine(destCkSumToken->crc, chunkCkSumToken->crc, chunkCkSumToken->crclen);
+  destCkSumToken->crclen += chunkCkSumToken->crclen;
 }
 
 ChecksumAlgo BlockSHA1CRCAlgo = {
-  .serial = BlockSHA1CRC,
+  .serialOnly = BlockSHA1CRCSerial,
+  .chunk = CRCChunk,
+  .combine = CRCCombine,
 };
 ChecksumAlgo BlockCRCAlgo = {
-  .serial = BlockCRC,
+  .serialOnly = BlockCRCSerial,
+  .chunk = CRCChunk,
+  .combine = CRCCombine,
 };
 ChecksumAlgo CRCProxyAlgo = {
-  .serial = CRCProxy,
+  .serialOnly = CRCSerial,
+  .chunk = CRCChunk,
+  .combine = CRCCombine,
 };
 
 /*

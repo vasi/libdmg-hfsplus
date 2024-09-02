@@ -225,7 +225,9 @@ typedef void (*FlipDataFunc)(unsigned char* data, char out);
 typedef void (*ChecksumFunc)(void* ckSum, const unsigned char* data, size_t len);
 
 typedef struct ChecksumAlgo {
-	ChecksumFunc serial; /* checksum a section serially */
+	ChecksumFunc serialOnly; /* only do the non-parallel parts */
+	ChecksumFunc chunk; /* chunksum one chunk */
+	void (*combine)(void* deskCkSum, void* chunkCkSum);
 } ChecksumAlgo;
 
 typedef struct ResourceKey {
@@ -244,6 +246,7 @@ typedef struct {
 typedef struct {
 	uint32_t block;
 	uint32_t crc;
+	size_t crclen;
 	SHA1_CTX sha1;
 } ChecksumToken;
 

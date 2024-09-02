@@ -17,6 +17,8 @@ typedef struct block {
 	BLKXRun run;
 	unsigned char* buf;
 	size_t bufsize;
+	ChecksumToken uncompressedChkToken;
+	ChecksumToken compressedChkToken;
 
 	struct block* next;
 } block;
@@ -37,6 +39,8 @@ typedef struct {
 	pthread_mutex_t mut;
 
 	AbstractFile* out;
+	const ChecksumAlgo* uncompressedChk;
+	void* uncompressedChkToken;
 	const ChecksumAlgo* compressedChk;
 	void* compressedChkToken;
 	BLKXTable* blkx;
@@ -94,7 +98,7 @@ static bool readBlock(inData* i, block *inb) {
 	// printf("run %d: sectors=%" PRId64 ", left=%d\n", inb->idx, inb->run.sectorCount, i->sectorsRemain);
 
 	if(i->uncompressedChk)
-		i->uncompressedChk->serial(i->uncompressedChkToken, inb->buf, inb->bufsize);
+		i->uncompressedChk->serialOnly(i->uncompressedChkToken, inb->buf, inb->bufsize);
 
 	i->curSector += inb->run.sectorCount;
 	if (!i->useEOF)
@@ -104,7 +108,8 @@ static bool readBlock(inData* i, block *inb) {
 	return true;
 }
 
-static void compressBlock(size_t bufferSize, block *inb, block *outb) {
+static void compressBlock(size_t bufferSize, const ChecksumAlgo* uncompressedChk, const ChecksumAlgo* compressedChk,
+		block *inb, block *outb) {
 	outb->idx = inb->idx;
 	outb->run = inb->run;
 
@@ -119,6 +124,15 @@ static void compressBlock(size_t bufferSize, block *inb, block *outb) {
 		outb->run.type = BLOCK_LZFSE;
 	}
 	outb->run.compLength = outb->bufsize;
+
+	if (uncompressedChk) {
+		memset(&outb->uncompressedChkToken, 0, sizeof(outb->uncompressedChkToken));
+		uncompressedChk->chunk(&outb->uncompressedChkToken, inb->buf, inb->bufsize);
+	}
+	if (compressedChk) {
+		memset(&outb->compressedChkToken, 0, sizeof(outb->compressedChkToken));
+		compressedChk->chunk(&outb->compressedChkToken, outb->buf, outb->bufsize);
+	}
 }
 
 static void writeBlock(outData* o, block *outb) {
@@ -132,8 +146,13 @@ static void writeBlock(outData* o, block *outb) {
 
 	ASSERT(o->out->write(o->out, outb->buf, outb->bufsize) == outb->bufsize, "fwrite");
 
-	if(o->compressedChk)
-		o->compressedChk->serial(o->compressedChkToken, outb->buf, outb->bufsize);
+	if(o->uncompressedChk) {
+		o->uncompressedChk->combine(o->uncompressedChkToken, &outb->uncompressedChkToken);
+	}
+	if(o->compressedChk) {
+		o->compressedChk->serialOnly(o->compressedChkToken, outb->buf, outb->bufsize);
+		o->compressedChk->combine(o->compressedChkToken, &outb->compressedChkToken);
+	}
 }
 
 static void addBlockPending(outData* o, block *outb) {
@@ -179,7 +198,7 @@ static void* threadWorker(void* arg) {
 		if (!readBlock(&d->in, inb))
 			break;
 
-		compressBlock(d->bufferSize, inb, outb);
+		compressBlock(d->bufferSize, d->in.uncompressedChk, d->out.compressedChk, inb, outb);
 		finishBlock(d->bufferSize, &d->out, outb);
 		outb = allocBlock(d->bufferSize);
 	}
@@ -208,6 +227,8 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	pthread_mutex_init(&td.in.mut, NULL);
 
 	td.out.out = out_;
+	td.out.uncompressedChk = uncompressedChk_;
+	td.out.uncompressedChkToken = uncompressedChkToken_;
 	td.out.compressedChk = compressedChk_;
 	td.out.compressedChkToken = compressedChkToken_;
 	td.out.nextIdx = 0;
