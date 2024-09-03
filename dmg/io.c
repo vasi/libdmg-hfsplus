@@ -43,6 +43,7 @@ typedef struct {
 	ChecksumFunc compressedChk;
 	void* compressedChkToken;
 	AbstractAttribution* attribution;
+	unsigned char *nextInBuffer;	
 
 	BLKXTable *blkx;
 	uint32_t roomForRuns;
@@ -67,64 +68,70 @@ void blockFree(block* b) {
 	free(b);
 }
 
+// Return NULL when no more blocks
+block* readBlock(threadData* d) {
+	if (d->numSectors == 0)
+		return NULL;
+	
+	block* b = blockAlloc(d->bufferSize);
+
+	b->run.type = BLOCK_BZIP2;
+	b->run.reserved = 0;
+	b->run.sectorStart = d->curSector;
+	b->run.sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
+
+	int nextAmountRead = 0;
+	b->run.sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
+
+	//printf("Currently at %" PRId64 "\n", curOff);
+	off_t sectorStart = d->startOff + (d->blkx->sectorCount - d->numSectors) * SECTOR_SIZE;
+	d->in->seek(d->in, sectorStart);
+	b->idx = d->curRun;
+	ASSERT((b->insize = d->in->read(d->in, b->inbuf, b->run.sectorCount * SECTOR_SIZE)) == (b->run.sectorCount * SECTOR_SIZE), "mRead");
+
+	if (d->numSectors - b->run.sectorCount > 0) {
+		// No need to rewind `inBuffer` because the next iteration of the loop
+		// calls `seek` anyways.
+		nextAmountRead = d->in->read(d->in, d->nextInBuffer, b->run.sectorCount * SECTOR_SIZE);
+	}
+
+	// printf("run %d: sectors=%" PRId64 ", left=%d\n", b->idx, b->run.sectorCount, d->numSectors);
+
+	if (d->attribution) {
+		// We either haven't found the sentinel value yet, or are already past it.
+		// Either way, keep searching.
+		if (d->keepRaw == KeepNoneRaw) {
+			d->keepRaw = d->attribution->shouldKeepRaw(d->attribution, b->inbuf, b->insize, d->nextInBuffer, nextAmountRead);
+		}
+		// KeepCurrentAndNextRaw means that the *previous* time through the loop `shouldKeepRaw`
+		// found the sentinel string, and that it crosses two runs. The previous
+		// loop already kept its run raw, and so must we. We don't want the _next_ run
+		// to also be raw though, so we adjust this appropriately.
+		// Note that KeepCurrentRaw will switch to KeepNoneRaw further down, when we've
+		// set the run raw.
+		else if (d->keepRaw == KeepCurrentAndNextRaw) {
+			d->keepRaw = KeepCurrentRaw;
+		}
+		else if (d->keepRaw == KeepCurrentRaw) {
+			d->keepRaw = KeepRemainingRaw;
+		}
+		// printf("keepRaw = %d (%p, %ld)\n", d->keepRaw, b->inbuf, b->insize);
+	}
+	
+	d->curSector += b->run.sectorCount;
+	d->numSectors -= b->run.sectorCount;
+	d->curRun++;
+
+	return b;
+}
+
 void *threadWorker(void* arg) {
 	threadData* d = (threadData*)arg;
 	block *b;
-	unsigned char *nextInBuffer;
-
-	b = blockAlloc(d->bufferSize);
-	ASSERT(nextInBuffer = (unsigned char*) malloc(d->bufferSize), "malloc");
-
+	
 	while(true) {
-		if (d->numSectors == 0)
+		if (!(b = readBlock(d)))
 			break;
-		
-		b->run.type = BLOCK_BZIP2;
-		b->run.reserved = 0;
-		b->run.sectorStart = d->curSector;
-		b->run.sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
-
-		int nextAmountRead = 0;
-		b->run.sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
-
-		//printf("Currently at %" PRId64 "\n", curOff);
-		off_t sectorStart = d->startOff + (d->blkx->sectorCount - d->numSectors) * SECTOR_SIZE;
-		d->in->seek(d->in, sectorStart);
-		b->idx = d->curRun;
-		ASSERT((b->insize = d->in->read(d->in, b->inbuf, b->run.sectorCount * SECTOR_SIZE)) == (b->run.sectorCount * SECTOR_SIZE), "mRead");
-
-		if (d->numSectors - b->run.sectorCount > 0) {
-			// No need to rewind `inBuffer` because the next iteration of the loop
-			// calls `seek` anyways.
-			nextAmountRead = d->in->read(d->in, nextInBuffer, b->run.sectorCount * SECTOR_SIZE);
-		}
-
-		// printf("run %d: sectors=%" PRId64 ", left=%d\n", b->idx, b->run.sectorCount, d->numSectors);
-
-		if (d->attribution) {
-			// We either haven't found the sentinel value yet, or are already past it.
-			// Either way, keep searching.
-			if (d->keepRaw == KeepNoneRaw) {
-				d->keepRaw = d->attribution->shouldKeepRaw(d->attribution, b->inbuf, b->insize, nextInBuffer, nextAmountRead);
-			}
-			// KeepCurrentAndNextRaw means that the *previous* time through the loop `shouldKeepRaw`
-			// found the sentinel string, and that it crosses two runs. The previous
-			// loop already kept its run raw, and so must we. We don't want the _next_ run
-			// to also be raw though, so we adjust this appropriately.
-			// Note that KeepCurrentRaw will switch to KeepNoneRaw further down, when we've
-			// set the run raw.
-			else if (d->keepRaw == KeepCurrentAndNextRaw) {
-				d->keepRaw = KeepCurrentRaw;
-			}
-			else if (d->keepRaw == KeepCurrentRaw) {
-				d->keepRaw = KeepRemainingRaw;
-			}
-			// printf("keepRaw = %d (%p, %ld)\n", d->keepRaw, b->inbuf, b->insize);
-		}
-		
-		d->curSector += b->run.sectorCount;
-		d->numSectors -= b->run.sectorCount;
-		d->curRun++;
 
 		bz_stream strm;
 		memset(&strm, 0, sizeof(strm));
@@ -189,10 +196,11 @@ void *threadWorker(void* arg) {
 			d->blkx = (BLKXTable*) realloc(d->blkx, sizeof(BLKXTable) + (d->roomForRuns * sizeof(BLKXRun)));
 		}
 		d->blkx->runs[b->idx] = b->run;
+
+		blockFree(b);
 	}
 
-	blockFree(b);
-	free(nextInBuffer);
+	return NULL;
 }
 
 BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSectorNumber, uint32_t numSectors_, uint32_t blocksDescriptor,
@@ -232,6 +240,7 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	td.blkx->blocksRunCount = 0;
 
 	td.bufferSize = SECTOR_SIZE * td.blkx->decompressBufferRequested;
+	ASSERT(td.nextInBuffer = (unsigned char*) malloc(td.bufferSize), "malloc");
 
 	td.curRun = 0;
 	td.curSector = 0;
@@ -257,6 +266,8 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	td.blkx->runs[td.curRun].compOffset = td.out->tell(td.out) - td.blkx->dataStart;
 	td.blkx->runs[td.curRun].compLength = 0;
 	td.blkx->blocksRunCount = td.curRun + 1;
+
+	free(td.nextInBuffer);
 
 	return td.blkx;
 }
