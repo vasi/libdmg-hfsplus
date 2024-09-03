@@ -159,7 +159,7 @@ int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, unsigned int B
 	}
 
 	blkx = insertBLKX(abstractOut, abstractIn, USER_OFFSET, (volumeHeader->totalBlocks * volumeHeader->blockSize)/SECTOR_SIZE,
-				pNum, CHECKSUM_UDIF_CRC32, &BlockSHA1CRC, &uncompressedToken, &CRCProxy, &dataForkToken, volume, 0, attribution);
+				pNum, CHECKSUM_UDIF_CRC32, &BlockSHA1CRC, &uncompressedToken, &CRCProxy, &dataForkToken, volume, attribution);
 
 	AttributionResource attributionResource;
 	memset(&attributionResource, 0, sizeof(AttributionResource));
@@ -371,7 +371,7 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut) {
 			
 			abstractIn->seek(abstractIn, partitions[i].pmPyPartStart * BlockSize);
 			blkx = insertBLKX(abstractOut, abstractIn, partitions[i].pmPyPartStart, partitions[i].pmPartBlkCnt, i, CHECKSUM_UDIF_CRC32,
-						&BlockCRC, &uncompressedToken, &CRCProxy, &dataForkToken, NULL, 0, NULL);
+						&BlockCRC, &uncompressedToken, &CRCProxy, &dataForkToken, NULL, NULL);
 			
 			blkx->checksum.data[0] = uncompressedToken.crc;	
 			resources = insertData(resources, "blkx", i, partitionName, 0, false, (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
@@ -412,7 +412,7 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut) {
 		
 		abstractIn->seek(abstractIn, 0);
 		blkx = insertBLKX(abstractOut, abstractIn, 0, fileLength/SECTOR_SIZE, ENTIRE_DEVICE_DESCRIPTOR, CHECKSUM_UDIF_CRC32,
-					&BlockCRC, &uncompressedToken, &CRCProxy, &dataForkToken, NULL, 0, NULL);
+					&BlockCRC, &uncompressedToken, &CRCProxy, &dataForkToken, NULL, NULL);
 		blkx->checksum.data[0] = uncompressedToken.crc;
 		resources = insertData(resources, "blkx", 0, "whole disk (unknown partition : 0)", 0, false, (const char*) blkx, sizeof(BLKXTable) + (blkx->blocksRunCount * sizeof(BLKXRun)), ATTRIBUTE_HDIUTIL);
 		free(blkx);
