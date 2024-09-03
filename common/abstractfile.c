@@ -395,7 +395,6 @@ int pipeSeek(AbstractFile* file, off_t offset) {
 	int ret;
 
 	info = (PipeInfo*) (file->data);
-	fprintf(stderr, "seek: %ld -> %ld\n", info->offset, offset);
 	
 	if (offset == info->offset) {
 		return 0;
