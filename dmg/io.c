@@ -180,7 +180,7 @@ void *threadWorker(void* arg) {
 			}
 		}
 
-		printf("run %d: sectors=%" PRId64 ", left=%d\n", d->curRun, d->blkx->runs[d->curRun].sectorCount, d->numSectors);
+		// printf("run %d: sectors=%" PRId64 ", left=%d\n", d->curRun, d->blkx->runs[d->curRun].sectorCount, d->numSectors);
 
 		ASSERT(BZ2_bzCompressInit(&strm, 9, 0, 0) == BZ_OK, "BZ2_bzCompressInit");
 
@@ -205,7 +205,7 @@ void *threadWorker(void* arg) {
 			else if (d->keepRaw == KeepCurrentRaw) {
 				d->keepRaw = KeepRemainingRaw;
 			}
-			printf("keepRaw = %d (%p, %ld)\n", d->keepRaw, b.inbuf, b.insize);
+			// printf("keepRaw = %d (%p, %ld)\n", d->keepRaw, b.inbuf, b.insize);
 		}
 
 		if(d->uncompressedChk)
