@@ -9,6 +9,17 @@
 #include <dmg/attribution.h>
 #include <inttypes.h>
 
+// Okay, this value sucks. You shouldn't touch it because it affects how many ignore sections get added to the blkx list
+// If the blkx list gets too fragmented with ignore sections, then the copy list in certain versions of the iPhone's
+// asr becomes too big. Due to Apple's BUGGY CODE, this causes asr to segfault! This is because the copy list becomes
+// too large for the initial buffer allocated, and realloc is called by asr. Unfortunately, after the realloc, the initial
+// pointer is still used by asr for a little while! Frakking noob mistake.
+
+// The only reason why it works at all is their really idiotic algorithm to determine where to put ignore blocks. It's
+// certainly nothing reasonable like "put in an ignore block if you encounter more than X blank sectors" (like mine)
+// There's always a large-ish one at the end, and a tiny 2 sector one at the end too, to take care of the space after
+// the backup volume header. No frakking clue how they go about determining how to do that.
+
 #define SECTORS_AT_A_TIME 0x200
 
 typedef struct {
@@ -31,90 +42,12 @@ typedef struct {
 	unsigned char* outBuffer;
 	size_t bufferSize;
 	int IGNORE_THRESHOLD;
+	uint64_t startOff;
+	enum ShouldKeepRaw keepRaw;
 } threadData;
 
-// Okay, this value sucks. You shouldn't touch it because it affects how many ignore sections get added to the blkx list
-// If the blkx list gets too fragmented with ignore sections, then the copy list in certain versions of the iPhone's
-// asr becomes too big. Due to Apple's BUGGY CODE, this causes asr to segfault! This is because the copy list becomes
-// too large for the initial buffer allocated, and realloc is called by asr. Unfortunately, after the realloc, the initial
-// pointer is still used by asr for a little while! Frakking noob mistake.
-
-// The only reason why it works at all is their really idiotic algorithm to determine where to put ignore blocks. It's
-// certainly nothing reasonable like "put in an ignore block if you encounter more than X blank sectors" (like mine)
-// There's always a large-ish one at the end, and a tiny 2 sector one at the end too, to take care of the space after
-// the backup volume header. No frakking clue how they go about determining how to do that.
-
-BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSectorNumber, uint32_t numSectors_, uint32_t blocksDescriptor,
-			uint32_t checksumType, ChecksumFunc uncompressedChk_, void* uncompressedChkToken_, ChecksumFunc compressedChk_,
-			void* compressedChkToken_, Volume* volume, int addComment_, AbstractAttribution* attribution_) {
-	threadData td = {
-		.out = out_,
-		.in = in_,
-		.numSectors = numSectors_,
-		.uncompressedChk = uncompressedChk_,
-		.uncompressedChkToken = uncompressedChkToken_,
-		.compressedChk = compressedChk_,
-		.compressedChkToken = compressedChkToken_,
-		.addComment = addComment_,
-		.attribution = attribution_,
-		.IGNORE_THRESHOLD = 100000,
-	};
-	threadData *d = &td;
-
-	td.blkx = (BLKXTable*) malloc(sizeof(BLKXTable) + (2 * sizeof(BLKXRun)));
-	td.roomForRuns = 2;
-	memset(td.blkx, 0, sizeof(BLKXTable) + (td.roomForRuns * sizeof(BLKXRun)));
-
-	td.blkx->fUDIFBlocksSignature = UDIF_BLOCK_SIGNATURE;
-	td.blkx->infoVersion = 1;
-	td.blkx->firstSectorNumber = firstSectorNumber;
-	td.blkx->sectorCount = td.numSectors;
-	td.blkx->dataStart = 0;
-	td.blkx->decompressBufferRequested = 0x208;
-	td.blkx->blocksDescriptor = blocksDescriptor;
-	td.blkx->reserved1 = 0;
-	td.blkx->reserved2 = 0;
-	td.blkx->reserved3 = 0;
-	td.blkx->reserved4 = 0;
-	td.blkx->reserved5 = 0;
-	td.blkx->reserved6 = 0;
-	memset(&(td.blkx->checksum), 0, sizeof(td.blkx->checksum));
-	td.blkx->checksum.type = checksumType;
-	td.blkx->checksum.bitness = checksumBitness(checksumType);
-	td.blkx->blocksRunCount = 0;
-
-	td.bufferSize = SECTOR_SIZE * td.blkx->decompressBufferRequested;
-
-	ASSERT(td.inBuffer = (unsigned char*) malloc(td.bufferSize), "malloc");
-	ASSERT(td.nextInBuffer = (unsigned char*) malloc(td.bufferSize), "malloc");
-	ASSERT(td.outBuffer = (unsigned char*) malloc(td.bufferSize), "malloc");
-
-	td.curRun = 0;
-	td.curSector = 0;
-
-	uint64_t startOff = td.in->tell(td.in);
-
-	enum ShouldKeepRaw keepRaw = KeepNoneRaw;
-	// We never want the iOS-specific tweaks when building attributable DMGs.
-	if (td.attribution) {
-		ASSERT(!td.addComment, "No attribution with addComment!");
-	}
-
-	if(td.addComment)
-	{
-		td.blkx->runs[td.curRun].type = BLOCK_COMMENT;
-		td.blkx->runs[td.curRun].reserved = 0x2B626567;
-		td.blkx->runs[td.curRun].sectorStart = td.curSector;
-		td.blkx->runs[td.curRun].sectorCount = 0;
-		td.blkx->runs[td.curRun].compOffset = td.out->tell(td.out) - td.blkx->dataStart;
-		td.blkx->runs[td.curRun].compLength = 0;
-		td.curRun++;
-
-		if(td.curRun >= td.roomForRuns) {
-			td.roomForRuns <<= 1;
-			td.blkx = (BLKXTable*) realloc(td.blkx, sizeof(BLKXTable) + (td.roomForRuns * sizeof(BLKXRun)));
-		}
-	}
+void *threadWorker(void* arg) {
+	threadData* d = (threadData*)arg;
 
 	while(d->numSectors > 0) {
 		size_t have;
@@ -146,7 +79,7 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 				d->blkx->runs[d->curRun].sectorCount = ((d->numSectors - processed) > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : (d->numSectors - processed);
 
 				//printf("Currently at %" PRId64 "\n", curOff);
-				off_t sectorStart = startOff + (d->blkx->sectorCount - d->numSectors + processed) * SECTOR_SIZE;
+				off_t sectorStart = d->startOff + (d->blkx->sectorCount - d->numSectors + processed) * SECTOR_SIZE;
 				d->in->seek(d->in, sectorStart);
 				ASSERT((amountRead = d->in->read(d->in, d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE)) == (d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE), "mRead");
 
@@ -244,8 +177,8 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 		if (d->attribution) {
 			// We either haven't found the sentinel value yet, or are already past it.
 			// Either way, keep searching.
-			if (keepRaw == KeepNoneRaw) {
-				keepRaw = d->attribution->shouldKeepRaw(d->attribution, d->inBuffer, amountRead, d->nextInBuffer, nextAmountRead);
+			if (d->keepRaw == KeepNoneRaw) {
+				d->keepRaw = d->attribution->shouldKeepRaw(d->attribution, d->inBuffer, amountRead, d->nextInBuffer, nextAmountRead);
 			}
 			// KeepCurrentAndNextRaw means that the *previous* time through the loop `shouldKeepRaw`
 			// found the sentinel string, and that it crosses two runs. The previous
@@ -253,13 +186,13 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 			// to also be raw though, so we adjust this appropriately.
 			// Note that KeepCurrentRaw will switch to KeepNoneRaw further down, when we've
 			// set the run raw.
-			else if (keepRaw == KeepCurrentAndNextRaw) {
-				keepRaw = KeepCurrentRaw;
+			else if (d->keepRaw == KeepCurrentAndNextRaw) {
+				d->keepRaw = KeepCurrentRaw;
 			}
-			else if (keepRaw == KeepCurrentRaw) {
-				keepRaw = KeepRemainingRaw;
+			else if (d->keepRaw == KeepCurrentRaw) {
+				d->keepRaw = KeepRemainingRaw;
 			}
-			printf("keepRaw = %d (%p, %d)\n", keepRaw, d->inBuffer, amountRead);
+			printf("keepRaw = %d (%p, %d)\n", d->keepRaw, d->inBuffer, amountRead);
 		}
 
 		if(d->uncompressedChk)
@@ -277,7 +210,7 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 		}
 		have = d->bufferSize - strm.avail_out;
 
-		if(keepRaw == KeepCurrentRaw || keepRaw == KeepCurrentAndNextRaw || ((have / SECTOR_SIZE) >= (d->blkx->runs[d->curRun].sectorCount - 15))) {
+		if(d->keepRaw == KeepCurrentRaw || d->keepRaw == KeepCurrentAndNextRaw || ((have / SECTOR_SIZE) >= (d->blkx->runs[d->curRun].sectorCount - 15))) {
 			printf("Setting type = BLOCK_RAW\n");
 			d->blkx->runs[d->curRun].type = BLOCK_RAW;
 			ASSERT(d->out->write(d->out, d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE) == (d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE), "fwrite");
@@ -289,7 +222,7 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 
 			if (d->attribution) {
 				// In a raw block, uncompressed and compressed data is identical.
-				d->attribution->observeBuffers(d->attribution, keepRaw,
+				d->attribution->observeBuffers(d->attribution, d->keepRaw,
 											d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE,
 											d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
 			}
@@ -301,7 +234,7 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 
 			if (d->attribution) {
 				// In a bzip2 block, uncompressed and compressed data are not the same.
-				d->attribution->observeBuffers(d->attribution, keepRaw,
+				d->attribution->observeBuffers(d->attribution, d->keepRaw,
 											d->inBuffer, amountRead,
 											d->outBuffer, have);
 			}
@@ -315,6 +248,81 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 		d->numSectors -= d->blkx->runs[d->curRun].sectorCount;
 		d->curRun++;
 	}
+
+}
+
+BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSectorNumber, uint32_t numSectors_, uint32_t blocksDescriptor,
+			uint32_t checksumType, ChecksumFunc uncompressedChk_, void* uncompressedChkToken_, ChecksumFunc compressedChk_,
+			void* compressedChkToken_, Volume* volume, int addComment_, AbstractAttribution* attribution_) {
+	threadData td = {
+		.out = out_,
+		.in = in_,
+		.numSectors = numSectors_,
+		.uncompressedChk = uncompressedChk_,
+		.uncompressedChkToken = uncompressedChkToken_,
+		.compressedChk = compressedChk_,
+		.compressedChkToken = compressedChkToken_,
+		.addComment = addComment_,
+		.attribution = attribution_,
+		.IGNORE_THRESHOLD = 100000,
+	};
+
+	td.blkx = (BLKXTable*) malloc(sizeof(BLKXTable) + (2 * sizeof(BLKXRun)));
+	td.roomForRuns = 2;
+	memset(td.blkx, 0, sizeof(BLKXTable) + (td.roomForRuns * sizeof(BLKXRun)));
+
+	td.blkx->fUDIFBlocksSignature = UDIF_BLOCK_SIGNATURE;
+	td.blkx->infoVersion = 1;
+	td.blkx->firstSectorNumber = firstSectorNumber;
+	td.blkx->sectorCount = td.numSectors;
+	td.blkx->dataStart = 0;
+	td.blkx->decompressBufferRequested = 0x208;
+	td.blkx->blocksDescriptor = blocksDescriptor;
+	td.blkx->reserved1 = 0;
+	td.blkx->reserved2 = 0;
+	td.blkx->reserved3 = 0;
+	td.blkx->reserved4 = 0;
+	td.blkx->reserved5 = 0;
+	td.blkx->reserved6 = 0;
+	memset(&(td.blkx->checksum), 0, sizeof(td.blkx->checksum));
+	td.blkx->checksum.type = checksumType;
+	td.blkx->checksum.bitness = checksumBitness(checksumType);
+	td.blkx->blocksRunCount = 0;
+
+	td.bufferSize = SECTOR_SIZE * td.blkx->decompressBufferRequested;
+
+	ASSERT(td.inBuffer = (unsigned char*) malloc(td.bufferSize), "malloc");
+	ASSERT(td.nextInBuffer = (unsigned char*) malloc(td.bufferSize), "malloc");
+	ASSERT(td.outBuffer = (unsigned char*) malloc(td.bufferSize), "malloc");
+
+	td.curRun = 0;
+	td.curSector = 0;
+
+	td.startOff = td.in->tell(td.in);
+	td.keepRaw = KeepNoneRaw;
+
+	// We never want the iOS-specific tweaks when building attributable DMGs.
+	if (td.attribution) {
+		ASSERT(!td.addComment, "No attribution with addComment!");
+	}
+
+	if(td.addComment)
+	{
+		td.blkx->runs[td.curRun].type = BLOCK_COMMENT;
+		td.blkx->runs[td.curRun].reserved = 0x2B626567;
+		td.blkx->runs[td.curRun].sectorStart = td.curSector;
+		td.blkx->runs[td.curRun].sectorCount = 0;
+		td.blkx->runs[td.curRun].compOffset = td.out->tell(td.out) - td.blkx->dataStart;
+		td.blkx->runs[td.curRun].compLength = 0;
+		td.curRun++;
+
+		if(td.curRun >= td.roomForRuns) {
+			td.roomForRuns <<= 1;
+			td.blkx = (BLKXTable*) realloc(td.blkx, sizeof(BLKXTable) + (td.roomForRuns * sizeof(BLKXRun)));
+		}
+	}
+
+	threadWorker(&td);
 
 	if(td.curRun >= td.roomForRuns) {
 		td.roomForRuns <<= 1;
