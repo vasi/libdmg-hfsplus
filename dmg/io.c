@@ -75,19 +75,14 @@ void *threadWorker(void* arg) {
 	b = blockAlloc(d->bufferSize);
 	ASSERT(nextInBuffer = (unsigned char*) malloc(d->bufferSize), "malloc");
 
-	while(d->numSectors > 0) {
-		int ret;
-		bz_stream strm;
-
+	while(true) {
+		if (d->numSectors == 0)
+			break;
+		
 		b->run.type = BLOCK_BZIP2;
 		b->run.reserved = 0;
 		b->run.sectorStart = d->curSector;
 		b->run.sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
-
-		memset(&strm, 0, sizeof(strm));
-		strm.bzalloc = Z_NULL;
-		strm.bzfree = Z_NULL;
-		strm.opaque = Z_NULL;
 
 		int nextAmountRead = 0;
 		b->run.sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
@@ -104,12 +99,7 @@ void *threadWorker(void* arg) {
 			nextAmountRead = d->in->read(d->in, nextInBuffer, b->run.sectorCount * SECTOR_SIZE);
 		}
 
-		// printf("run %d: sectors=%" PRId64 ", left=%d\n", d->curRun, b->run.sectorCount, d->numSectors);
-
-		ASSERT(BZ2_bzCompressInit(&strm, 9, 0, 0) == BZ_OK, "BZ2_bzCompressInit");
-
-		strm.avail_in = b->insize;
-		strm.next_in = (char*)b->inbuf;
+		// printf("run %d: sectors=%" PRId64 ", left=%d\n", b->idx, b->run.sectorCount, d->numSectors);
 
 		if (d->attribution) {
 			// We either haven't found the sentinel value yet, or are already past it.
@@ -131,21 +121,35 @@ void *threadWorker(void* arg) {
 			}
 			// printf("keepRaw = %d (%p, %ld)\n", d->keepRaw, b->inbuf, b->insize);
 		}
+		
+		d->curSector += b->run.sectorCount;
+		d->numSectors -= b->run.sectorCount;
+		d->curRun++;
 
-		if(d->uncompressedChk)
-			(*d->uncompressedChk)(d->uncompressedChkToken, b->inbuf, b->run.sectorCount * SECTOR_SIZE);
-
-		b->run.compOffset = d->out->tell(d->out) - d->blkx->dataStart;
-		b->run.compLength = 0;
-
+		bz_stream strm;
+		memset(&strm, 0, sizeof(strm));
+		strm.bzalloc = Z_NULL;
+		strm.bzfree = Z_NULL;
+		strm.opaque = Z_NULL;
+		ASSERT(BZ2_bzCompressInit(&strm, 9, 0, 0) == BZ_OK, "BZ2_bzCompressInit");
+		strm.avail_in = b->insize;
+		strm.next_in = (char*)b->inbuf;
 		strm.avail_out = d->bufferSize;
 		strm.next_out = (char*)b->outbuf;
 
+		int ret;
 		ASSERT((ret = BZ2_bzCompress(&strm, BZ_FINISH)) != BZ_SEQUENCE_ERROR, "BZ2_bzCompress/BZ_SEQUENCE_ERROR");
 		if(ret != BZ_STREAM_END) {
 			ASSERT(FALSE, "BZ2_bzCompress");
 		}
+		BZ2_bzCompressEnd(&strm);
 		b->outsize = d->bufferSize - strm.avail_out;
+
+		b->run.compOffset = d->out->tell(d->out) - d->blkx->dataStart;
+		b->run.compLength = 0;
+
+		if(d->uncompressedChk)
+			(*d->uncompressedChk)(d->uncompressedChkToken, b->inbuf, b->run.sectorCount * SECTOR_SIZE);
 		
 		int keepRaw = (d->keepRaw == KeepCurrentRaw || d->keepRaw == KeepCurrentAndNextRaw);
 		if(keepRaw || ((b->outsize / SECTOR_SIZE) >= (b->run.sectorCount - 15))) {
@@ -180,18 +184,11 @@ void *threadWorker(void* arg) {
 			b->run.compLength += b->outsize;
 		}
 
-		BZ2_bzCompressEnd(&strm);
-
-		d->curSector += b->run.sectorCount;
-		d->numSectors -= b->run.sectorCount;
-
-		if(d->curRun >= d->roomForRuns) {
+		if(b->idx >= d->roomForRuns) {
 			d->roomForRuns <<= 1;
 			d->blkx = (BLKXTable*) realloc(d->blkx, sizeof(BLKXTable) + (d->roomForRuns * sizeof(BLKXRun)));
 		}
-		d->blkx->runs[d->curRun] = b->run;
-
-		d->curRun++;
+		d->blkx->runs[b->idx] = b->run;
 	}
 
 	blockFree(b);
