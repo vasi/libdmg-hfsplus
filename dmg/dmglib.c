@@ -341,7 +341,7 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut, int zlibLe
 
 			memset(&uncompressedToken, 0, sizeof(uncompressedToken));
 
-			ASSERT(abstractIn->seek(abstractIn, partitions[i].pmPyPartStart * BlockSize) == 0, "seek");
+			ASSERT(abstractIn->seek(abstractIn, (off_t)partitions[i].pmPyPartStart * BlockSize) == 0, "seek");
 			blkx = insertBLKX(abstractOut, abstractIn, partitions[i].pmPyPartStart, partitions[i].pmPartBlkCnt, i, CHECKSUM_CRC32,
 						&BlockCRCAlgo, &uncompressedToken, &CRCProxyAlgo, &dataForkToken, NULL, zlibLevel);
 
