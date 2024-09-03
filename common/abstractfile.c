@@ -342,51 +342,100 @@ AbstractFile* createAbstractFileFromMemoryFileBuffer(void** buffer, size_t* size
 
 typedef struct {
 	FILE* file;
-	off_t offset;
+	off_t offset; /* logical offset */
+	unsigned char* startBuf;
+	size_t startSize;
 } PipeInfo;
 
 size_t pipeRead(AbstractFile* file, void* data, size_t len) {
-	PipeInfo* info = (PipeInfo*) (file->data);
-  size_t ret = fread(data, 1, len, info->file);
-	info->offset += ret;
-	return ret;
+	PipeInfo* info;
+	size_t read, n;
+
+	info = (PipeInfo*) (file->data);
+	read = 0;
+	
+	if (info->offset < info->startSize) {
+		n = info->startSize - info->offset;
+		if (n > len)
+			n = len;
+
+		memcpy(data, info->startBuf + info->offset, n);
+		info->offset += n;
+		len -= n;
+		read += n;
+	}
+	if (len > 0) {
+	  n = fread(data, 1, len, info->file);
+		info->offset += n;
+		read += n;
+	}
+	return read;
 }
 
 size_t pipeWrite(AbstractFile* file, const void* data, size_t len) {
-	ASSERT(0, "pipe write");
+	return -1;
+}
+
+int pipeSkipTo(PipeInfo* info, off_t offset) {
+	char buf[4096];
+	size_t len, read;
+
+	while (info->offset < offset) {
+		len = (sizeof(buf) + info->offset > offset) ? (offset - info->offset) : sizeof(buf);
+		read = fread(buf, 1, len, info->file);
+		info->offset += read;
+		if (read != len)
+			return -1;
+	}
 	return 0;
 }
 
 int pipeSeek(AbstractFile* file, off_t offset) {
+	PipeInfo* info;
 	int ret;
-	PipeInfo* info = (PipeInfo*) (file->data);
-	fprintf(stderr, "seek %ld -> %ld\n", info->offset, offset);
-	ret = fseeko(info->file, offset, SEEK_SET);
-	info->offset = offset;
-	return ret;
+
+	info = (PipeInfo*) (file->data);
+	fprintf(stderr, "seek: %ld -> %ld\n", info->offset, offset);
+	
+	if (offset == info->offset) {
+		return 0;
+	} else if (offset < info->offset) {
+	  if (info->offset > info->startSize) {
+			/* we may lose data if we seek back here */
+			errno = ESPIPE;
+			return -1;
+		} else {
+			info->offset = offset;
+			return 0;
+		}
+	} else {
+		return pipeSkipTo(info, offset);
+	}
 }
 
 off_t pipeTell(AbstractFile* file) {
 	PipeInfo* info = (PipeInfo*) (file->data);
-	return ftello(info->file);
+	return info->offset;
 }
 
 void pipeClose(AbstractFile* file) {
 	PipeInfo* info = (PipeInfo*) (file->data);
 	fclose(info->file);
+	free(info->startBuf);
 	free(info);
 	free(file);
 }
 
 off_t pipeGetLength(AbstractFile* file) {
-	ASSERT(0, "pipe length");
 	return -1;
 }
 
 int pipeEOF(AbstractFile* file) {
 	PipeInfo* info = (PipeInfo*) (file->data);
-	return feof(info->file);
+	return (info->offset >= info->startSize) && feof(info->file);
 }
+
+#define PIPE_DEFAULT_BUFFER_SIZE (10 * 1024 * 1024)
 
 AbstractFile* createAbstractFileFromPipe(FILE* file, size_t bufferSize) {
 	AbstractFile* toReturn;
@@ -396,11 +445,16 @@ AbstractFile* createAbstractFileFromPipe(FILE* file, size_t bufferSize) {
 		return NULL;
 	}
 
-	info = (PipeInfo*) malloc(sizeof(PipeInfo));
+	ASSERT(info = (PipeInfo*) malloc(sizeof(PipeInfo)), "malloc");
 	info->file = file;
 	info->offset = 0;
+	if (bufferSize == 0) {
+		bufferSize = PIPE_DEFAULT_BUFFER_SIZE;
+	}
+	ASSERT(info->startBuf = malloc(bufferSize), "malloc");
+	info->startSize = fread(info->startBuf, 1, bufferSize, info->file);
 
-	toReturn = (AbstractFile*) malloc(sizeof(AbstractFile));
+	ASSERT(toReturn = (AbstractFile*) malloc(sizeof(AbstractFile)), "malloc");
 	toReturn->data = info;
 	toReturn->read = pipeRead;
 	toReturn->write = pipeWrite;
