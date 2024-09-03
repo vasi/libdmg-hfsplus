@@ -24,7 +24,8 @@
 #define SECTORS_AT_A_TIME 0x200
 
 typedef struct {
-	uint32_t run;
+	uint32_t idx;
+	BLKXRun run;
 
 	unsigned char* inbuf;
 	size_t insize;
@@ -66,14 +67,10 @@ void *threadWorker(void* arg) {
 		int ret;
 		bz_stream strm;
 
-		if(d->curRun >= d->roomForRuns) {
-			d->roomForRuns <<= 1;
-			d->blkx = (BLKXTable*) realloc(d->blkx, sizeof(BLKXTable) + (d->roomForRuns * sizeof(BLKXRun)));
-		}
-		d->blkx->runs[d->curRun].type = BLOCK_BZIP2;
-		d->blkx->runs[d->curRun].reserved = 0;
-		d->blkx->runs[d->curRun].sectorStart = d->curSector;
-		d->blkx->runs[d->curRun].sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
+		b.run.type = BLOCK_BZIP2;
+		b.run.reserved = 0;
+		b.run.sectorStart = d->curSector;
+		b.run.sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
 
 		memset(&strm, 0, sizeof(strm));
 		strm.bzalloc = Z_NULL;
@@ -81,21 +78,21 @@ void *threadWorker(void* arg) {
 		strm.opaque = Z_NULL;
 
 		int nextAmountRead = 0;
-		d->blkx->runs[d->curRun].sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
+		b.run.sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
 
 		//printf("Currently at %" PRId64 "\n", curOff);
 		off_t sectorStart = d->startOff + (d->blkx->sectorCount - d->numSectors) * SECTOR_SIZE;
 		d->in->seek(d->in, sectorStart);
-		b.run = d->curRun;
-		ASSERT((b.insize = d->in->read(d->in, b.inbuf, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE)) == (d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE), "mRead");
+		b.idx = d->curRun;
+		ASSERT((b.insize = d->in->read(d->in, b.inbuf, b.run.sectorCount * SECTOR_SIZE)) == (b.run.sectorCount * SECTOR_SIZE), "mRead");
 
-		if (d->numSectors - d->blkx->runs[d->curRun].sectorCount > 0) {
+		if (d->numSectors - b.run.sectorCount > 0) {
 			// No need to rewind `inBuffer` because the next iteration of the loop
 			// calls `seek` anyways.
-			nextAmountRead = d->in->read(d->in, nextInBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
+			nextAmountRead = d->in->read(d->in, nextInBuffer, b.run.sectorCount * SECTOR_SIZE);
 		}
 
-		// printf("run %d: sectors=%" PRId64 ", left=%d\n", d->curRun, d->blkx->runs[d->curRun].sectorCount, d->numSectors);
+		// printf("run %d: sectors=%" PRId64 ", left=%d\n", d->curRun, b.run.sectorCount, d->numSectors);
 
 		ASSERT(BZ2_bzCompressInit(&strm, 9, 0, 0) == BZ_OK, "BZ2_bzCompressInit");
 
@@ -124,10 +121,10 @@ void *threadWorker(void* arg) {
 		}
 
 		if(d->uncompressedChk)
-			(*d->uncompressedChk)(d->uncompressedChkToken, b.inbuf, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
+			(*d->uncompressedChk)(d->uncompressedChkToken, b.inbuf, b.run.sectorCount * SECTOR_SIZE);
 
-		d->blkx->runs[d->curRun].compOffset = d->out->tell(d->out) - d->blkx->dataStart;
-		d->blkx->runs[d->curRun].compLength = 0;
+		b.run.compOffset = d->out->tell(d->out) - d->blkx->dataStart;
+		b.run.compLength = 0;
 
 		strm.avail_out = d->bufferSize;
 		strm.next_out = (char*)b.outbuf;
@@ -138,21 +135,21 @@ void *threadWorker(void* arg) {
 		}
 		b.outsize = d->bufferSize - strm.avail_out;
 
-		if(d->keepRaw == KeepCurrentRaw || d->keepRaw == KeepCurrentAndNextRaw || ((b.outsize / SECTOR_SIZE) >= (d->blkx->runs[d->curRun].sectorCount - 15))) {
+		if(d->keepRaw == KeepCurrentRaw || d->keepRaw == KeepCurrentAndNextRaw || ((b.outsize / SECTOR_SIZE) >= (b.run.sectorCount - 15))) {
 			printf("Setting type = BLOCK_RAW\n");
-			d->blkx->runs[d->curRun].type = BLOCK_RAW;
-			ASSERT(d->out->write(d->out, b.inbuf, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE) == (d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE), "fwrite");
-			d->blkx->runs[d->curRun].compLength += d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE;
+			b.run.type = BLOCK_RAW;
+			ASSERT(d->out->write(d->out, b.inbuf, b.run.sectorCount * SECTOR_SIZE) == (b.run.sectorCount * SECTOR_SIZE), "fwrite");
+			b.run.compLength += b.run.sectorCount * SECTOR_SIZE;
 
 
 			if(d->compressedChk)
-				(*d->compressedChk)(d->compressedChkToken, b.inbuf, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
+				(*d->compressedChk)(d->compressedChkToken, b.inbuf, b.run.sectorCount * SECTOR_SIZE);
 
 			if (d->attribution) {
 				// In a raw block, uncompressed and compressed data is identical.
 				d->attribution->observeBuffers(d->attribution, d->keepRaw,
-											b.inbuf, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE,
-											b.inbuf, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
+											b.inbuf, b.run.sectorCount * SECTOR_SIZE,
+											b.inbuf, b.run.sectorCount * SECTOR_SIZE);
 			}
 		} else {
 			ASSERT(d->out->write(d->out, b.outbuf, b.outsize) == b.outsize, "fwrite");
@@ -167,13 +164,20 @@ void *threadWorker(void* arg) {
 											b.outbuf, b.outsize);
 			}
 
-			d->blkx->runs[d->curRun].compLength += b.outsize;
+			b.run.compLength += b.outsize;
 		}
 
 		BZ2_bzCompressEnd(&strm);
 
-		d->curSector += d->blkx->runs[d->curRun].sectorCount;
-		d->numSectors -= d->blkx->runs[d->curRun].sectorCount;
+		d->curSector += b.run.sectorCount;
+		d->numSectors -= b.run.sectorCount;
+
+		if(d->curRun >= d->roomForRuns) {
+			d->roomForRuns <<= 1;
+			d->blkx = (BLKXTable*) realloc(d->blkx, sizeof(BLKXTable) + (d->roomForRuns * sizeof(BLKXRun)));
+		}
+		d->blkx->runs[d->curRun] = b.run;
+
 		d->curRun++;
 	}
 
