@@ -36,23 +36,26 @@ typedef struct {
 } block;
 
 typedef struct {
-	AbstractFile* out;
+	size_t bufferSize;
+	AbstractAttribution* attribution;
+
+	// Read
 	AbstractFile* in;
 	uint32_t numSectors;
+	uint32_t curRun;
+	uint64_t curSector;
+	uint64_t startOff;
+	unsigned char *nextInBuffer;	
+	enum ShouldKeepRaw keepRaw;
+
+	// Write
+	AbstractFile* out;
+	BLKXTable *blkx;
+	uint32_t roomForRuns;
 	ChecksumFunc uncompressedChk;
 	void* uncompressedChkToken;
 	ChecksumFunc compressedChk;
 	void* compressedChkToken;
-	AbstractAttribution* attribution;
-	unsigned char *nextInBuffer;	
-
-	BLKXTable *blkx;
-	uint32_t roomForRuns;
-	uint32_t curRun;
-	uint64_t curSector;
-	size_t bufferSize;
-	uint64_t startOff;
-	enum ShouldKeepRaw keepRaw;
 } threadData;
 
 block* blockAlloc(size_t bufferSize) {
