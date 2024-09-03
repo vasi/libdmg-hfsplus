@@ -64,6 +64,7 @@ typedef struct {
 extern "C" {
 #endif
 	AbstractFile* createAbstractFileFromFile(FILE* file);
+	AbstractFile* createAbstractFileFromArg(const char* arg, const char* mode);
 	AbstractFile* createAbstractFileFromDummy();
 	AbstractFile* createAbstractFileFromMemory(void** buffer, size_t size);
 	AbstractFile* createAbstractFileFromMemoryFile(void** buffer, size_t* size);

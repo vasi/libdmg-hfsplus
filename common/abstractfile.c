@@ -52,6 +52,22 @@ int isPipe(FILE* file) {
 	return (ret != 0);
 }
 
+#define STDIO_NAME "-"
+
+AbstractFile* createAbstractFileFromArg(const char* arg, const char* mode) {
+	FILE* file;
+
+	if (strcmp(STDIO_NAME, arg) == 0) {
+		if (index(mode, 'w') != NULL)
+			file = stdout;
+		else
+			file = stdin;
+	} else {
+		file = fopen(arg, mode);
+	}
+	return createAbstractFileFromFile(file);
+}
+
 AbstractFile* createAbstractFileFromFile(FILE* file) {
 	AbstractFile* toReturn;
 
