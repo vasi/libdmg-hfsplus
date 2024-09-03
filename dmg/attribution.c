@@ -71,7 +71,7 @@ void sentinelBeforeMainBlkx(AbstractAttribution* attribution, AbstractFile* abst
 void sentinelObserveBuffers(AbstractAttribution* attribution, int didKeepRaw, const void* uncompressedData, size_t uncompressedLen, const void* compressedData, size_t compressedLen) {
 	AttributionPreservingSentinelData* attributionData = (AttributionPreservingSentinelData*)attribution->data;
 
-	if (didKeepRaw == KeepCurrentRaw || didKeepRaw == KeepCurrentAndNextRaw) {
+	if (didKeepRaw) {
 		// If this is our first time in, we need to set up `raw_*` and `afterRaw*`
 		// from scratch.
 		if (attributionData->afterRaw_UncompressedLength < 0) {
