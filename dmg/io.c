@@ -26,6 +26,7 @@
 typedef struct {
 	uint32_t idx;
 	BLKXRun run;
+	int keepRaw;
 
 	unsigned char* inbuf;
 	size_t insize;
@@ -74,7 +75,8 @@ block* readBlock(threadData* d) {
 		return NULL;
 	
 	block* b = blockAlloc(d->bufferSize);
-
+	
+	b->keepRaw = 0;
 	b->run.type = BLOCK_BZIP2;
 	b->run.reserved = 0;
 	b->run.sectorStart = d->curSector;
@@ -116,6 +118,7 @@ block* readBlock(threadData* d) {
 			d->keepRaw = KeepRemainingRaw;
 		}
 		// printf("keepRaw = %d (%p, %ld)\n", d->keepRaw, b->inbuf, b->insize);
+		b->keepRaw = (d->keepRaw == KeepCurrentRaw || d->keepRaw == KeepCurrentAndNextRaw);
 	}
 	
 	d->curSector += b->run.sectorCount;
@@ -158,8 +161,7 @@ void *threadWorker(void* arg) {
 		if(d->uncompressedChk)
 			(*d->uncompressedChk)(d->uncompressedChkToken, b->inbuf, b->run.sectorCount * SECTOR_SIZE);
 		
-		int keepRaw = (d->keepRaw == KeepCurrentRaw || d->keepRaw == KeepCurrentAndNextRaw);
-		if(keepRaw || ((b->outsize / SECTOR_SIZE) >= (b->run.sectorCount - 15))) {
+		if(b->keepRaw || ((b->outsize / SECTOR_SIZE) >= (b->run.sectorCount - 15))) {
 			// printf("Setting type = BLOCK_RAW\n");
 			b->run.type = BLOCK_RAW;
 			ASSERT(d->out->write(d->out, b->inbuf, b->run.sectorCount * SECTOR_SIZE) == (b->run.sectorCount * SECTOR_SIZE), "fwrite");
@@ -171,7 +173,7 @@ void *threadWorker(void* arg) {
 
 			if (d->attribution) {
 				// In a raw block, uncompressed and compressed data is identical.
-				d->attribution->observeBuffers(d->attribution, keepRaw,
+				d->attribution->observeBuffers(d->attribution, b->keepRaw,
 											b->inbuf, b->run.sectorCount * SECTOR_SIZE,
 											b->inbuf, b->run.sectorCount * SECTOR_SIZE);
 			}
@@ -183,7 +185,7 @@ void *threadWorker(void* arg) {
 
 			if (d->attribution) {
 				// In a bzip2 block, uncompressed and compressed data are not the same.
-				d->attribution->observeBuffers(d->attribution, keepRaw,
+				d->attribution->observeBuffers(d->attribution, b->keepRaw,
 											b->inbuf, b->insize,
 											b->outbuf, b->outsize);
 			}
