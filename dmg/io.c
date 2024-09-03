@@ -133,8 +133,9 @@ void *threadWorker(void* arg) {
 			ASSERT(FALSE, "BZ2_bzCompress");
 		}
 		b.outsize = d->bufferSize - strm.avail_out;
-
-		if(d->keepRaw == KeepCurrentRaw || d->keepRaw == KeepCurrentAndNextRaw || ((b.outsize / SECTOR_SIZE) >= (b.run.sectorCount - 15))) {
+		
+		int keepRaw = (d->keepRaw == KeepCurrentRaw || d->keepRaw == KeepCurrentAndNextRaw);
+		if(keepRaw || ((b.outsize / SECTOR_SIZE) >= (b.run.sectorCount - 15))) {
 			// printf("Setting type = BLOCK_RAW\n");
 			b.run.type = BLOCK_RAW;
 			ASSERT(d->out->write(d->out, b.inbuf, b.run.sectorCount * SECTOR_SIZE) == (b.run.sectorCount * SECTOR_SIZE), "fwrite");
@@ -146,7 +147,7 @@ void *threadWorker(void* arg) {
 
 			if (d->attribution) {
 				// In a raw block, uncompressed and compressed data is identical.
-				d->attribution->observeBuffers(d->attribution, d->keepRaw,
+				d->attribution->observeBuffers(d->attribution, keepRaw,
 											b.inbuf, b.run.sectorCount * SECTOR_SIZE,
 											b.inbuf, b.run.sectorCount * SECTOR_SIZE);
 			}
@@ -158,7 +159,7 @@ void *threadWorker(void* arg) {
 
 			if (d->attribution) {
 				// In a bzip2 block, uncompressed and compressed data are not the same.
-				d->attribution->observeBuffers(d->attribution, d->keepRaw,
+				d->attribution->observeBuffers(d->attribution, keepRaw,
 											b.inbuf, b.insize,
 											b.outbuf, b.outsize);
 			}
