@@ -12,7 +12,25 @@
 #define SECTORS_AT_A_TIME 0x200
 
 typedef struct {
+	AbstractFile* out;
+	AbstractFile* in;
+	uint32_t numSectors;
+	ChecksumFunc uncompressedChk;
+	void* uncompressedChkToken;
+	ChecksumFunc compressedChk;
+	void* compressedChkToken;
+	int addComment;
+	AbstractAttribution* attribution;
+
 	BLKXTable *blkx;
+	uint32_t roomForRuns;
+	uint32_t curRun;
+	uint64_t curSector;
+	unsigned char* inBuffer;
+	unsigned char* nextInBuffer;
+	unsigned char* outBuffer;
+	size_t bufferSize;
+	int IGNORE_THRESHOLD;
 } threadData;
 
 // Okay, this value sucks. You shouldn't touch it because it affects how many ignore sections get added to the blkx list
@@ -26,34 +44,31 @@ typedef struct {
 // There's always a large-ish one at the end, and a tiny 2 sector one at the end too, to take care of the space after
 // the backup volume header. No frakking clue how they go about determining how to do that.
 
-BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorNumber, uint32_t numSectors, uint32_t blocksDescriptor,
-			uint32_t checksumType, ChecksumFunc uncompressedChk, void* uncompressedChkToken, ChecksumFunc compressedChk,
-			void* compressedChkToken, Volume* volume, int addComment, AbstractAttribution* attribution) {
-	threadData td;
-	
-	uint32_t roomForRuns;
-	uint32_t curRun;
-	uint64_t curSector;
-
-	unsigned char* inBuffer;
-	unsigned char* nextInBuffer;
-	unsigned char* outBuffer;
-	size_t bufferSize;
-	size_t have;
-	int ret;
-
-	int IGNORE_THRESHOLD = 100000;
-
-	bz_stream strm;
+BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSectorNumber, uint32_t numSectors_, uint32_t blocksDescriptor,
+			uint32_t checksumType, ChecksumFunc uncompressedChk_, void* uncompressedChkToken_, ChecksumFunc compressedChk_,
+			void* compressedChkToken_, Volume* volume, int addComment_, AbstractAttribution* attribution_) {
+	threadData td = {
+		.out = out_,
+		.in = in_,
+		.numSectors = numSectors_,
+		.uncompressedChk = uncompressedChk_,
+		.uncompressedChkToken = uncompressedChkToken_,
+		.compressedChk = compressedChk_,
+		.compressedChkToken = compressedChkToken_,
+		.addComment = addComment_,
+		.attribution = attribution_,
+		.IGNORE_THRESHOLD = 100000,
+	};
+	threadData *d = &td;
 
 	td.blkx = (BLKXTable*) malloc(sizeof(BLKXTable) + (2 * sizeof(BLKXRun)));
-	roomForRuns = 2;
-	memset(td.blkx, 0, sizeof(BLKXTable) + (roomForRuns * sizeof(BLKXRun)));
+	td.roomForRuns = 2;
+	memset(td.blkx, 0, sizeof(BLKXTable) + (td.roomForRuns * sizeof(BLKXRun)));
 
 	td.blkx->fUDIFBlocksSignature = UDIF_BLOCK_SIGNATURE;
 	td.blkx->infoVersion = 1;
 	td.blkx->firstSectorNumber = firstSectorNumber;
-	td.blkx->sectorCount = numSectors;
+	td.blkx->sectorCount = td.numSectors;
 	td.blkx->dataStart = 0;
 	td.blkx->decompressBufferRequested = 0x208;
 	td.blkx->blocksDescriptor = blocksDescriptor;
@@ -68,48 +83,52 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 	td.blkx->checksum.bitness = checksumBitness(checksumType);
 	td.blkx->blocksRunCount = 0;
 
-	bufferSize = SECTOR_SIZE * td.blkx->decompressBufferRequested;
+	td.bufferSize = SECTOR_SIZE * td.blkx->decompressBufferRequested;
 
-	ASSERT(inBuffer = (unsigned char*) malloc(bufferSize), "malloc");
-	ASSERT(nextInBuffer = (unsigned char*) malloc(bufferSize), "malloc");
-	ASSERT(outBuffer = (unsigned char*) malloc(bufferSize), "malloc");
+	ASSERT(td.inBuffer = (unsigned char*) malloc(td.bufferSize), "malloc");
+	ASSERT(td.nextInBuffer = (unsigned char*) malloc(td.bufferSize), "malloc");
+	ASSERT(td.outBuffer = (unsigned char*) malloc(td.bufferSize), "malloc");
 
-	curRun = 0;
-	curSector = 0;
+	td.curRun = 0;
+	td.curSector = 0;
 
-	uint64_t startOff = in->tell(in);
+	uint64_t startOff = td.in->tell(td.in);
 
 	enum ShouldKeepRaw keepRaw = KeepNoneRaw;
 	// We never want the iOS-specific tweaks when building attributable DMGs.
-	if (attribution) {
-		ASSERT(!addComment, "No attribution with addComment!");
+	if (td.attribution) {
+		ASSERT(!td.addComment, "No attribution with addComment!");
 	}
 
-	if(addComment)
+	if(td.addComment)
 	{
-		td.blkx->runs[curRun].type = BLOCK_COMMENT;
-		td.blkx->runs[curRun].reserved = 0x2B626567;
-		td.blkx->runs[curRun].sectorStart = curSector;
-		td.blkx->runs[curRun].sectorCount = 0;
-		td.blkx->runs[curRun].compOffset = out->tell(out) - td.blkx->dataStart;
-		td.blkx->runs[curRun].compLength = 0;
-		curRun++;
+		td.blkx->runs[td.curRun].type = BLOCK_COMMENT;
+		td.blkx->runs[td.curRun].reserved = 0x2B626567;
+		td.blkx->runs[td.curRun].sectorStart = td.curSector;
+		td.blkx->runs[td.curRun].sectorCount = 0;
+		td.blkx->runs[td.curRun].compOffset = td.out->tell(td.out) - td.blkx->dataStart;
+		td.blkx->runs[td.curRun].compLength = 0;
+		td.curRun++;
 
-		if(curRun >= roomForRuns) {
-			roomForRuns <<= 1;
-			td.blkx = (BLKXTable*) realloc(td.blkx, sizeof(BLKXTable) + (roomForRuns * sizeof(BLKXRun)));
+		if(td.curRun >= td.roomForRuns) {
+			td.roomForRuns <<= 1;
+			td.blkx = (BLKXTable*) realloc(td.blkx, sizeof(BLKXTable) + (td.roomForRuns * sizeof(BLKXRun)));
 		}
 	}
 
-	while(numSectors > 0) {
-		if(curRun >= roomForRuns) {
-			roomForRuns <<= 1;
-			td.blkx = (BLKXTable*) realloc(td.blkx, sizeof(BLKXTable) + (roomForRuns * sizeof(BLKXRun)));
+	while(d->numSectors > 0) {
+		size_t have;
+		int ret;
+		bz_stream strm;
+
+		if(d->curRun >= d->roomForRuns) {
+			d->roomForRuns <<= 1;
+			d->blkx = (BLKXTable*) realloc(d->blkx, sizeof(BLKXTable) + (d->roomForRuns * sizeof(BLKXRun)));
 		}
-		td.blkx->runs[curRun].type = BLOCK_BZIP2;
-		td.blkx->runs[curRun].reserved = 0;
-		td.blkx->runs[curRun].sectorStart = curSector;
-		td.blkx->runs[curRun].sectorCount = (numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : numSectors;
+		d->blkx->runs[d->curRun].type = BLOCK_BZIP2;
+		d->blkx->runs[d->curRun].reserved = 0;
+		d->blkx->runs[d->curRun].sectorStart = d->curSector;
+		d->blkx->runs[d->curRun].sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
 
 		memset(&strm, 0, sizeof(strm));
 		strm.bzalloc = Z_NULL;
@@ -122,33 +141,33 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 			size_t sectorsToSkip = 0;
 			size_t processed = 0;
 
-			while(processed < numSectors)
+			while(processed < d->numSectors)
 			{
-				td.blkx->runs[curRun].sectorCount = ((numSectors - processed) > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : (numSectors - processed);
+				d->blkx->runs[d->curRun].sectorCount = ((d->numSectors - processed) > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : (d->numSectors - processed);
 
 				//printf("Currently at %" PRId64 "\n", curOff);
-				off_t sectorStart = startOff + (td.blkx->sectorCount - numSectors + processed) * SECTOR_SIZE;
-				in->seek(in, sectorStart);
-				ASSERT((amountRead = in->read(in, inBuffer, td.blkx->runs[curRun].sectorCount * SECTOR_SIZE)) == (td.blkx->runs[curRun].sectorCount * SECTOR_SIZE), "mRead");
+				off_t sectorStart = startOff + (d->blkx->sectorCount - d->numSectors + processed) * SECTOR_SIZE;
+				d->in->seek(d->in, sectorStart);
+				ASSERT((amountRead = d->in->read(d->in, d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE)) == (d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE), "mRead");
 
-				if (numSectors - td.blkx->runs[curRun].sectorCount > 0) {
+				if (d->numSectors - d->blkx->runs[d->curRun].sectorCount > 0) {
 					// No need to rewind `inBuffer` because the next iteration of the loop
 					// calls `seek` anyways.
-					nextAmountRead = in->read(in, nextInBuffer, td.blkx->runs[curRun].sectorCount * SECTOR_SIZE);
+					nextAmountRead = d->in->read(d->in, d->nextInBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
 				}
 
-				if(!addComment)
+				if(!d->addComment)
 					break;
 
 				processed += amountRead / SECTOR_SIZE;
 
-				size_t* checkBuffer = (size_t*) inBuffer;
+				size_t* checkBuffer = (size_t*) d->inBuffer;
 				size_t counter;
 				size_t counter_max = amountRead / sizeof(size_t);
 				for(counter = 0; counter < counter_max; counter++)
 				{
 					if(checkBuffer[counter] != 0) {
-						//printf("Not empty at %" PRId64 " / %" PRId64 "\n", (int64_t)(counter * sizeof(size_t)) + curOff, (int64_t)((counter * sizeof(size_t)) / SECTOR_SIZE + sectorsToSkip + td.blkx->runs[curRun].sectorStart));
+						//printf("Not empty at %" PRId64 " / %" PRId64 "\n", (int64_t)(counter * sizeof(size_t)) + curOff, (int64_t)((counter * sizeof(size_t)) / SECTOR_SIZE + sectorsToSkip + d->blkx->runs[d->curRun].sectorStart));
 						break;
 					}
 				}
@@ -160,7 +179,7 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 
 				if(counter < counter_max)
 				{
-					if(sectorsToSkip > IGNORE_THRESHOLD)
+					if(sectorsToSkip > d->IGNORE_THRESHOLD)
 					{
 						//printf("Seeking back to %" PRId64 "\n", curOff + (skipInBuffer * SECTOR_SIZE));
 						//in->seek(in, curOff + (skipInBuffer * SECTOR_SIZE));
@@ -171,66 +190,66 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 				}
 			}
 
-			if(sectorsToSkip > IGNORE_THRESHOLD)
+			if(sectorsToSkip > d->IGNORE_THRESHOLD)
 			{
 				int remainder = sectorsToSkip & 0xf;
 
 				if(sectorsToSkip != remainder)
 				{
-					td.blkx->runs[curRun].type = BLOCK_IGNORE;
-					td.blkx->runs[curRun].reserved = 0;
-					td.blkx->runs[curRun].sectorStart = curSector;
-					td.blkx->runs[curRun].sectorCount = sectorsToSkip - remainder;
-					td.blkx->runs[curRun].compOffset = out->tell(out) - td.blkx->dataStart;
-					td.blkx->runs[curRun].compLength = 0;
+					d->blkx->runs[d->curRun].type = BLOCK_IGNORE;
+					d->blkx->runs[d->curRun].reserved = 0;
+					d->blkx->runs[d->curRun].sectorStart = d->curSector;
+					d->blkx->runs[d->curRun].sectorCount = sectorsToSkip - remainder;
+					d->blkx->runs[d->curRun].compOffset = d->out->tell(d->out) - d->blkx->dataStart;
+					d->blkx->runs[d->curRun].compLength = 0;
 
-					printf("run %d: skipping sectors=%" PRId64 ", left=%d\n", curRun, (int64_t) sectorsToSkip, numSectors);
+					printf("run %d: skipping sectors=%" PRId64 ", left=%d\n", d->curRun, (int64_t) sectorsToSkip, d->numSectors);
 
-					curSector += td.blkx->runs[curRun].sectorCount;
-					numSectors -= td.blkx->runs[curRun].sectorCount;
+					d->curSector += d->blkx->runs[d->curRun].sectorCount;
+					d->numSectors -= d->blkx->runs[d->curRun].sectorCount;
 
-					curRun++;
+					d->curRun++;
 				}
 
 				if(remainder > 0)
 				{
-					td.blkx->runs[curRun].type = BLOCK_IGNORE;
-					td.blkx->runs[curRun].reserved = 0;
-					td.blkx->runs[curRun].sectorStart = curSector;
-					td.blkx->runs[curRun].sectorCount = remainder;
-					td.blkx->runs[curRun].compOffset = out->tell(out) - td.blkx->dataStart;
-					td.blkx->runs[curRun].compLength = 0;
+					d->blkx->runs[d->curRun].type = BLOCK_IGNORE;
+					d->blkx->runs[d->curRun].reserved = 0;
+					d->blkx->runs[d->curRun].sectorStart = d->curSector;
+					d->blkx->runs[d->curRun].sectorCount = remainder;
+					d->blkx->runs[d->curRun].compOffset = d->out->tell(d->out) - d->blkx->dataStart;
+					d->blkx->runs[d->curRun].compLength = 0;
 
-					printf("run %d: skipping sectors=%" PRId64 ", left=%d\n", curRun, (int64_t) sectorsToSkip, numSectors);
+					printf("run %d: skipping sectors=%" PRId64 ", left=%d\n", d->curRun, (int64_t) sectorsToSkip, d->numSectors);
 
-					curSector += td.blkx->runs[curRun].sectorCount;
-					numSectors -= td.blkx->runs[curRun].sectorCount;
+					d->curSector += d->blkx->runs[d->curRun].sectorCount;
+					d->numSectors -= d->blkx->runs[d->curRun].sectorCount;
 
-					curRun++;
+					d->curRun++;
 				}
 
-				IGNORE_THRESHOLD = 0;
+				d->IGNORE_THRESHOLD = 0;
 
 				continue;
 			}
 		}
 
-		printf("run %d: sectors=%" PRId64 ", left=%d\n", curRun, td.blkx->runs[curRun].sectorCount, numSectors);
+		printf("run %d: sectors=%" PRId64 ", left=%d\n", d->curRun, d->blkx->runs[d->curRun].sectorCount, d->numSectors);
 
 		ASSERT(BZ2_bzCompressInit(&strm, 9, 0, 0) == BZ_OK, "BZ2_bzCompressInit");
 
 		strm.avail_in = amountRead;
-		strm.next_in = (char*)inBuffer;
+		strm.next_in = (char*)d->inBuffer;
 
-		if (attribution) {
+		if (d->attribution) {
 			// We either haven't found the sentinel value yet, or are already past it.
 			// Either way, keep searching.
 			if (keepRaw == KeepNoneRaw) {
-				keepRaw = attribution->shouldKeepRaw(attribution, inBuffer, amountRead, nextInBuffer, nextAmountRead);
+				keepRaw = d->attribution->shouldKeepRaw(d->attribution, d->inBuffer, amountRead, d->nextInBuffer, nextAmountRead);
 			}
 			// KeepCurrentAndNextRaw means that the *previous* time through the loop `shouldKeepRaw`
 			// found the sentinel string, and that it crosses two runs. The previous
-			// loop already kept its run raw, and so must we. We don't want the _next_ run 
+			// loop already kept its run raw, and so must we. We don't want the _next_ run
 			// to also be raw though, so we adjust this appropriately.
 			// Note that KeepCurrentRaw will switch to KeepNoneRaw further down, when we've
 			// set the run raw.
@@ -240,94 +259,94 @@ BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorN
 			else if (keepRaw == KeepCurrentRaw) {
 				keepRaw = KeepRemainingRaw;
 			}
-			printf("keepRaw = %d (%p, %d)\n", keepRaw, inBuffer, amountRead);
+			printf("keepRaw = %d (%p, %d)\n", keepRaw, d->inBuffer, amountRead);
 		}
 
-		if(uncompressedChk)
-			(*uncompressedChk)(uncompressedChkToken, inBuffer, td.blkx->runs[curRun].sectorCount * SECTOR_SIZE);
+		if(d->uncompressedChk)
+			(*d->uncompressedChk)(d->uncompressedChkToken, d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
 
-		td.blkx->runs[curRun].compOffset = out->tell(out) - td.blkx->dataStart;
-		td.blkx->runs[curRun].compLength = 0;
+		d->blkx->runs[d->curRun].compOffset = d->out->tell(d->out) - d->blkx->dataStart;
+		d->blkx->runs[d->curRun].compLength = 0;
 
-		strm.avail_out = bufferSize;
-		strm.next_out = (char*)outBuffer;
+		strm.avail_out = d->bufferSize;
+		strm.next_out = (char*)d->outBuffer;
 
 		ASSERT((ret = BZ2_bzCompress(&strm, BZ_FINISH)) != BZ_SEQUENCE_ERROR, "BZ2_bzCompress/BZ_SEQUENCE_ERROR");
 		if(ret != BZ_STREAM_END) {
 			ASSERT(FALSE, "BZ2_bzCompress");
 		}
-		have = bufferSize - strm.avail_out;
+		have = d->bufferSize - strm.avail_out;
 
-		if(keepRaw == KeepCurrentRaw || keepRaw == KeepCurrentAndNextRaw || ((have / SECTOR_SIZE) >= (td.blkx->runs[curRun].sectorCount - 15))) {
+		if(keepRaw == KeepCurrentRaw || keepRaw == KeepCurrentAndNextRaw || ((have / SECTOR_SIZE) >= (d->blkx->runs[d->curRun].sectorCount - 15))) {
 			printf("Setting type = BLOCK_RAW\n");
-			td.blkx->runs[curRun].type = BLOCK_RAW;
-			ASSERT(out->write(out, inBuffer, td.blkx->runs[curRun].sectorCount * SECTOR_SIZE) == (td.blkx->runs[curRun].sectorCount * SECTOR_SIZE), "fwrite");
-			td.blkx->runs[curRun].compLength += td.blkx->runs[curRun].sectorCount * SECTOR_SIZE;
+			d->blkx->runs[d->curRun].type = BLOCK_RAW;
+			ASSERT(d->out->write(d->out, d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE) == (d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE), "fwrite");
+			d->blkx->runs[d->curRun].compLength += d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE;
 
 
-			if(compressedChk)
-				(*compressedChk)(compressedChkToken, inBuffer, td.blkx->runs[curRun].sectorCount * SECTOR_SIZE);
+			if(d->compressedChk)
+				(*d->compressedChk)(d->compressedChkToken, d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
 
-			if (attribution) {
+			if (d->attribution) {
 				// In a raw block, uncompressed and compressed data is identical.
-				attribution->observeBuffers(attribution, keepRaw,
-											inBuffer, td.blkx->runs[curRun].sectorCount * SECTOR_SIZE,
-											inBuffer, td.blkx->runs[curRun].sectorCount * SECTOR_SIZE);
+				d->attribution->observeBuffers(d->attribution, keepRaw,
+											d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE,
+											d->inBuffer, d->blkx->runs[d->curRun].sectorCount * SECTOR_SIZE);
 			}
 		} else {
-			ASSERT(out->write(out, outBuffer, have) == have, "fwrite");
+			ASSERT(d->out->write(d->out, d->outBuffer, have) == have, "fwrite");
 
-			if(compressedChk)
-				(*compressedChk)(compressedChkToken, outBuffer, have);
+			if(d->compressedChk)
+				(*d->compressedChk)(d->compressedChkToken, d->outBuffer, have);
 
-			if (attribution) {
+			if (d->attribution) {
 				// In a bzip2 block, uncompressed and compressed data are not the same.
-				attribution->observeBuffers(attribution, keepRaw,
-											inBuffer, amountRead,
-											outBuffer, have);
+				d->attribution->observeBuffers(d->attribution, keepRaw,
+											d->inBuffer, amountRead,
+											d->outBuffer, have);
 			}
 
-			td.blkx->runs[curRun].compLength += have;
+			d->blkx->runs[d->curRun].compLength += have;
 		}
 
 		BZ2_bzCompressEnd(&strm);
 
-		curSector += td.blkx->runs[curRun].sectorCount;
-		numSectors -= td.blkx->runs[curRun].sectorCount;
-		curRun++;
+		d->curSector += d->blkx->runs[d->curRun].sectorCount;
+		d->numSectors -= d->blkx->runs[d->curRun].sectorCount;
+		d->curRun++;
 	}
 
-	if(curRun >= roomForRuns) {
-		roomForRuns <<= 1;
-		td.blkx = (BLKXTable*) realloc(td.blkx, sizeof(BLKXTable) + (roomForRuns * sizeof(BLKXRun)));
+	if(td.curRun >= td.roomForRuns) {
+		td.roomForRuns <<= 1;
+		td.blkx = (BLKXTable*) realloc(td.blkx, sizeof(BLKXTable) + (td.roomForRuns * sizeof(BLKXRun)));
 	}
 
-	if(addComment)
+	if(td.addComment)
 	{
-		td.blkx->runs[curRun].type = BLOCK_COMMENT;
-		td.blkx->runs[curRun].reserved = 0x2B656E64;
-		td.blkx->runs[curRun].sectorStart = curSector;
-		td.blkx->runs[curRun].sectorCount = 0;
-		td.blkx->runs[curRun].compOffset = out->tell(out) - td.blkx->dataStart;
-		td.blkx->runs[curRun].compLength = 0;
-		curRun++;
+		td.blkx->runs[td.curRun].type = BLOCK_COMMENT;
+		td.blkx->runs[td.curRun].reserved = 0x2B656E64;
+		td.blkx->runs[td.curRun].sectorStart = td.curSector;
+		td.blkx->runs[td.curRun].sectorCount = 0;
+		td.blkx->runs[td.curRun].compOffset = td.out->tell(td.out) - td.blkx->dataStart;
+		td.blkx->runs[td.curRun].compLength = 0;
+		td.curRun++;
 
-		if(curRun >= roomForRuns) {
-			roomForRuns <<= 1;
-			td.blkx = (BLKXTable*) realloc(td.blkx, sizeof(BLKXTable) + (roomForRuns * sizeof(BLKXRun)));
+		if(td.curRun >= td.roomForRuns) {
+			td.roomForRuns <<= 1;
+			td.blkx = (BLKXTable*) realloc(td.blkx, sizeof(BLKXTable) + (td.roomForRuns * sizeof(BLKXRun)));
 		}
 	}
 
-	td.blkx->runs[curRun].type = BLOCK_TERMINATOR;
-	td.blkx->runs[curRun].reserved = 0;
-	td.blkx->runs[curRun].sectorStart = curSector;
-	td.blkx->runs[curRun].sectorCount = 0;
-	td.blkx->runs[curRun].compOffset = out->tell(out) - td.blkx->dataStart;
-	td.blkx->runs[curRun].compLength = 0;
-	td.blkx->blocksRunCount = curRun + 1;
+	td.blkx->runs[td.curRun].type = BLOCK_TERMINATOR;
+	td.blkx->runs[td.curRun].reserved = 0;
+	td.blkx->runs[td.curRun].sectorStart = td.curSector;
+	td.blkx->runs[td.curRun].sectorCount = 0;
+	td.blkx->runs[td.curRun].compOffset = td.out->tell(td.out) - td.blkx->dataStart;
+	td.blkx->runs[td.curRun].compLength = 0;
+	td.blkx->blocksRunCount = td.curRun + 1;
 
-	free(inBuffer);
-	free(outBuffer);
+	free(td.inBuffer);
+	free(td.outBuffer);
 
 	return td.blkx;
 }
