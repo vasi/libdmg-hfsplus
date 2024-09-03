@@ -87,7 +87,6 @@ block* readBlock(threadData* d) {
 	
 	block* b = blockAlloc(d->bufferSize, d->curRun);
 	
-	b->run.type = BLOCK_BZIP2;
 	b->run.sectorStart = d->curSector;
 	b->run.sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
 
@@ -143,63 +142,47 @@ void *threadWorker(void* arg) {
 	while(true) {
 		if (!(b = readBlock(d)))
 			break;
+		
+		if (!b->keepRaw) {
+			bz_stream strm;
+			memset(&strm, 0, sizeof(strm));
+			strm.bzalloc = Z_NULL;
+			strm.bzfree = Z_NULL;
+			strm.opaque = Z_NULL;
+			ASSERT(BZ2_bzCompressInit(&strm, 9, 0, 0) == BZ_OK, "BZ2_bzCompressInit");
+			strm.avail_in = b->insize;
+			strm.next_in = (char*)b->inbuf;
+			strm.avail_out = d->bufferSize;
+			strm.next_out = (char*)b->outbuf;
 
-		bz_stream strm;
-		memset(&strm, 0, sizeof(strm));
-		strm.bzalloc = Z_NULL;
-		strm.bzfree = Z_NULL;
-		strm.opaque = Z_NULL;
-		ASSERT(BZ2_bzCompressInit(&strm, 9, 0, 0) == BZ_OK, "BZ2_bzCompressInit");
-		strm.avail_in = b->insize;
-		strm.next_in = (char*)b->inbuf;
-		strm.avail_out = d->bufferSize;
-		strm.next_out = (char*)b->outbuf;
-
-		int ret;
-		ASSERT((ret = BZ2_bzCompress(&strm, BZ_FINISH)) != BZ_SEQUENCE_ERROR, "BZ2_bzCompress/BZ_SEQUENCE_ERROR");
-		if(ret != BZ_STREAM_END) {
-			ASSERT(FALSE, "BZ2_bzCompress");
+			int ret;
+			ASSERT((ret = BZ2_bzCompress(&strm, BZ_FINISH)) != BZ_SEQUENCE_ERROR, "BZ2_bzCompress/BZ_SEQUENCE_ERROR");
+			if(ret != BZ_STREAM_END) {
+				ASSERT(FALSE, "BZ2_bzCompress");
+			}
+			BZ2_bzCompressEnd(&strm);
+			b->outsize = d->bufferSize - strm.avail_out;
 		}
-		BZ2_bzCompressEnd(&strm);
-		b->outsize = d->bufferSize - strm.avail_out;
-
-		b->run.compOffset = d->out->tell(d->out) - d->blkx->dataStart;
-		b->run.compLength = 0;
-
-		if(d->uncompressedChk)
-			(*d->uncompressedChk)(d->uncompressedChkToken, b->inbuf, b->run.sectorCount * SECTOR_SIZE);
 		
 		if(b->keepRaw || ((b->outsize / SECTOR_SIZE) >= (b->run.sectorCount - 15))) {
 			// printf("Setting type = BLOCK_RAW\n");
 			b->run.type = BLOCK_RAW;
-			ASSERT(d->out->write(d->out, b->inbuf, b->run.sectorCount * SECTOR_SIZE) == (b->run.sectorCount * SECTOR_SIZE), "fwrite");
-			b->run.compLength += b->run.sectorCount * SECTOR_SIZE;
-
-
-			if(d->compressedChk)
-				(*d->compressedChk)(d->compressedChkToken, b->inbuf, b->run.sectorCount * SECTOR_SIZE);
-
-			if (d->attribution) {
-				// In a raw block, uncompressed and compressed data is identical.
-				d->attribution->observeBuffers(d->attribution, b->keepRaw,
-											b->inbuf, b->run.sectorCount * SECTOR_SIZE,
-											b->inbuf, b->run.sectorCount * SECTOR_SIZE);
-			}
+			memcpy(b->outbuf, b->inbuf, b->insize);
+			b->outsize = b->insize;
 		} else {
-			ASSERT(d->out->write(d->out, b->outbuf, b->outsize) == b->outsize, "fwrite");
-
-			if(d->compressedChk)
-				(*d->compressedChk)(d->compressedChkToken, b->outbuf, b->outsize);
-
-			if (d->attribution) {
-				// In a bzip2 block, uncompressed and compressed data are not the same.
-				d->attribution->observeBuffers(d->attribution, b->keepRaw,
-											b->inbuf, b->insize,
-											b->outbuf, b->outsize);
-			}
-
-			b->run.compLength += b->outsize;
+			b->run.type = BLOCK_BZIP2;
 		}
+		b->run.compLength = b->outsize;
+
+		if(d->uncompressedChk)
+			(*d->uncompressedChk)(d->uncompressedChkToken, b->inbuf, b->run.sectorCount * SECTOR_SIZE);
+		if(d->compressedChk)
+			(*d->compressedChk)(d->compressedChkToken, b->outbuf, b->outsize);
+		if (d->attribution)
+			d->attribution->observeBuffers(d->attribution, b->keepRaw, b->inbuf, b->insize, b->outbuf, b->outsize);		
+
+		b->run.compOffset = d->out->tell(d->out) - d->blkx->dataStart;
+		ASSERT(d->out->write(d->out, b->outbuf, b->outsize) == b->outsize, "fwrite");
 
 		if(b->idx >= d->roomForRuns) {
 			d->roomForRuns <<= 1;
