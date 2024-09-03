@@ -135,7 +135,7 @@ void *threadWorker(void* arg) {
 		b.outsize = d->bufferSize - strm.avail_out;
 
 		if(d->keepRaw == KeepCurrentRaw || d->keepRaw == KeepCurrentAndNextRaw || ((b.outsize / SECTOR_SIZE) >= (b.run.sectorCount - 15))) {
-			printf("Setting type = BLOCK_RAW\n");
+			// printf("Setting type = BLOCK_RAW\n");
 			b.run.type = BLOCK_RAW;
 			ASSERT(d->out->write(d->out, b.inbuf, b.run.sectorCount * SECTOR_SIZE) == (b.run.sectorCount * SECTOR_SIZE), "fwrite");
 			b.run.compLength += b.run.sectorCount * SECTOR_SIZE;
