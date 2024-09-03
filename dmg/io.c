@@ -49,7 +49,6 @@ typedef struct {
 	uint32_t curRun;
 	uint64_t curSector;
 	size_t bufferSize;
-	int IGNORE_THRESHOLD;
 	uint64_t startOff;
 	enum ShouldKeepRaw keepRaw;
 } threadData;
@@ -197,7 +196,6 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 		.compressedChk = compressedChk_,
 		.compressedChkToken = compressedChkToken_,
 		.attribution = attribution_,
-		.IGNORE_THRESHOLD = 100000,
 	};
 
 	td.blkx = (BLKXTable*) malloc(sizeof(BLKXTable) + (2 * sizeof(BLKXRun)));
