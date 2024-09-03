@@ -3,6 +3,7 @@
 #include <string.h>
 #include <zlib.h>
 #include <bzlib.h>
+#include <pthread.h>
 
 #include <dmg/dmg.h>
 #include <dmg/adc.h>
@@ -322,7 +323,11 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 		}
 	}
 
-	threadWorker(&td);
+	pthread_t thread;
+	ASSERT(pthread_create(&thread, NULL, threadWorker, &td) == 0, "pthread_create");
+	void *ret;
+	ASSERT(pthread_join(thread, &ret) == 0, "pthread_join");
+	ASSERT(ret == NULL, "thread return");
 
 	if(td.curRun >= td.roomForRuns) {
 		td.roomForRuns <<= 1;
