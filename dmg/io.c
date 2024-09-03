@@ -24,6 +24,8 @@
 #define SECTORS_AT_A_TIME 0x200
 
 typedef struct {
+	size_t bufferSize;
+
 	uint32_t idx;
 	BLKXRun run;
 	int keepRaw;
@@ -58,9 +60,15 @@ typedef struct {
 	void* compressedChkToken;
 } threadData;
 
-block* blockAlloc(size_t bufferSize) {
+block* blockAlloc(size_t bufferSize, size_t idx) {
 	block* b;
 	ASSERT(b = (block*)malloc(sizeof(block)), "malloc");
+
+	b->idx = idx;
+	b->bufferSize = bufferSize;
+	b->keepRaw = 0;
+	b->run.reserved = 0;
+
 	ASSERT(b->inbuf = (unsigned char*)malloc(bufferSize), "malloc");
 	ASSERT(b->outbuf = (unsigned char*)malloc(bufferSize), "malloc");
 	return b;
@@ -77,11 +85,9 @@ block* readBlock(threadData* d) {
 	if (d->numSectors == 0)
 		return NULL;
 	
-	block* b = blockAlloc(d->bufferSize);
+	block* b = blockAlloc(d->bufferSize, d->curRun);
 	
-	b->keepRaw = 0;
 	b->run.type = BLOCK_BZIP2;
-	b->run.reserved = 0;
 	b->run.sectorStart = d->curSector;
 	b->run.sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
 
@@ -91,7 +97,6 @@ block* readBlock(threadData* d) {
 	//printf("Currently at %" PRId64 "\n", curOff);
 	off_t sectorStart = d->startOff + (d->blkx->sectorCount - d->numSectors) * SECTOR_SIZE;
 	d->in->seek(d->in, sectorStart);
-	b->idx = d->curRun;
 	ASSERT((b->insize = d->in->read(d->in, b->inbuf, b->run.sectorCount * SECTOR_SIZE)) == (b->run.sectorCount * SECTOR_SIZE), "mRead");
 
 	if (d->numSectors - b->run.sectorCount > 0) {
