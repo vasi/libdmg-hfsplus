@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <zlib.h>
-#include <lzfse.h>
+#include <bzlib.h>
 #include <pthread.h>
 #include <unistd.h>
 
@@ -10,7 +10,7 @@
 #include <dmg/adc.h>
 #include <inttypes.h>
 
-#define SECTORS_AT_A_TIME 0x800
+#define SECTORS_AT_A_TIME 0x200
 
 typedef struct block {
 	uint32_t idx;
@@ -113,15 +113,30 @@ static void compressBlock(size_t bufferSize, const ChecksumAlgo* uncompressedChk
 	outb->idx = inb->idx;
 	outb->run = inb->run;
 
-	outb->bufsize = lzfse_encode_buffer(outb->buf, bufferSize, inb->buf, inb->bufsize, NULL);
-	ASSERT(outb->bufsize > 0, "compression error");
+	bz_stream strm;
+	memset(&strm, 0, sizeof(strm));
+	strm.bzalloc = Z_NULL;
+	strm.bzfree = Z_NULL;
+	strm.opaque = Z_NULL;
+
+	ASSERT(BZ2_bzCompressInit(&strm, 9, 0, 0) == BZ_OK, "BZ2_bzCompressInit");
+	strm.avail_in = inb->bufsize;
+	strm.next_in = inb->buf;
+	strm.avail_out = bufferSize;
+	strm.next_out = outb->buf;
+
+	int ret = BZ2_bzCompress(&strm, BZ_FINISH);
+	ASSERT(ret != BZ_SEQUENCE_ERROR, "BZ_SEQUENCE_ERROR");
+	ASSERT(ret == BZ_STREAM_END, "BZ_STREAM_END");
+	outb->bufsize = bufferSize - strm.avail_out;
+	BZ2_bzCompressEnd(&strm);
 
 	if (outb->bufsize > inb->bufsize) {
 		outb->run.type = BLOCK_RAW;
 		memcpy(outb->buf, inb->buf, inb->bufsize);
 		outb->bufsize = inb->bufsize;
 	} else {
-		outb->run.type = BLOCK_LZFSE;
+		outb->run.type = BLOCK_BZIP2;
 	}
 	outb->run.compLength = outb->bufsize;
 
@@ -243,7 +258,7 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	td.out.blkx->infoVersion = 1;
 	td.out.blkx->firstSectorNumber = firstSectorNumber;
 	td.out.blkx->dataStart = 0;
-	td.out.blkx->decompressBufferRequested = SECTORS_AT_A_TIME + 8;
+	td.out.blkx->decompressBufferRequested = 0x208;
 	td.out.blkx->blocksDescriptor = blocksDescriptor;
 	td.out.blkx->reserved1 = 0;
 	td.out.blkx->reserved2 = 0;

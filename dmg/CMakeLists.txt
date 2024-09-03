@@ -1,4 +1,5 @@
 INCLUDE(FindZLIB)
+INCLUDE(FindBZip2)
 
 IF(NOT APPLE)
 	INCLUDE(FindOpenSSL)
@@ -12,6 +13,9 @@ ENDIF()
 IF(NOT ZLIB_FOUND)
 	message(FATAL_ERROR "zlib is required for dmg!")
 ENDIF()
+IF(NOT BZIP2_FOUND)
+	message(FATAL_ERROR "bzip2 is required for dmg!")
+ENDIF(NOT BZIP2_FOUND)
 
 include_directories(${ZLIB_INCLUDE_DIR})
 
@@ -35,7 +39,7 @@ ELSEIF(OPENSSL_FOUND)
 ENDIF()
 
 target_link_libraries(dmg common hfs ${ZLIB_LIBRARIES})
-target_link_libraries(dmg ${LZFSE_LIBRARY})
+target_link_libraries(dmg ${LZFSE_LIBRARY} bz2)
 
 add_executable(dmg-bin dmg.c)
 target_link_libraries(dmg-bin dmg)
