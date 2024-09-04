@@ -47,7 +47,8 @@ typedef struct {
 	uint32_t curRun;
 	uint64_t curSector;
 	uint64_t startOff;
-	unsigned char *nextInBuffer;	
+	unsigned char *nextInBuffer;
+	size_t nextInSize;	
 	enum ShouldKeepRaw keepRaw;
 
 	// Write
@@ -86,22 +87,21 @@ block* readBlock(threadData* d) {
 		return NULL;
 	
 	block* b = blockAlloc(d->bufferSize, d->curRun);
-	
+		
 	b->run.sectorStart = d->curSector;
 	b->run.sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
+	size_t readSize = b->run.sectorCount * SECTOR_SIZE;
 
-	int nextAmountRead = 0;
-	b->run.sectorCount = (d->numSectors > SECTORS_AT_A_TIME) ? SECTORS_AT_A_TIME : d->numSectors;
-
-	//printf("Currently at %" PRId64 "\n", curOff);
-	off_t sectorStart = d->startOff + (d->blkx->sectorCount - d->numSectors) * SECTOR_SIZE;
-	d->in->seek(d->in, sectorStart);
-	ASSERT((b->insize = d->in->read(d->in, b->inbuf, b->run.sectorCount * SECTOR_SIZE)) == (b->run.sectorCount * SECTOR_SIZE), "mRead");
+	if (b->idx == 0) {
+		ASSERT((b->insize = d->in->read(d->in, b->inbuf, readSize)) == readSize, "mRead");	
+	} else {
+		// Steal from the next block
+		memcpy(b->inbuf, d->nextInBuffer, d->nextInSize);
+		b->insize = d->nextInSize;
+	}
 
 	if (d->numSectors - b->run.sectorCount > 0) {
-		// No need to rewind `inBuffer` because the next iteration of the loop
-		// calls `seek` anyways.
-		nextAmountRead = d->in->read(d->in, d->nextInBuffer, b->run.sectorCount * SECTOR_SIZE);
+		d->nextInSize = d->in->read(d->in, d->nextInBuffer, readSize);
 	}
 
 	// printf("run %d: sectors=%" PRId64 ", left=%d\n", b->idx, b->run.sectorCount, d->numSectors);
@@ -110,7 +110,7 @@ block* readBlock(threadData* d) {
 		// We either haven't found the sentinel value yet, or are already past it.
 		// Either way, keep searching.
 		if (d->keepRaw == KeepNoneRaw) {
-			d->keepRaw = d->attribution->shouldKeepRaw(d->attribution, b->inbuf, b->insize, d->nextInBuffer, nextAmountRead);
+			d->keepRaw = d->attribution->shouldKeepRaw(d->attribution, b->inbuf, b->insize, d->nextInBuffer, d->nextInSize);
 		}
 		// KeepCurrentAndNextRaw means that the *previous* time through the loop `shouldKeepRaw`
 		// found the sentinel string, and that it crosses two runs. The previous
