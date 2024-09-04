@@ -277,13 +277,11 @@ extern "C" {
 	uint32_t checksumBitness(uint32_t type);
 
 	uint32_t CRC32Checksum(uint32_t* crc, const unsigned char *buf, size_t len);
-	uint32_t CRC32ZeroesChecksum(uint32_t* crc, size_t len);    
 	uint32_t MKBlockChecksum(uint32_t* ckSum, const unsigned char* data, size_t len);
 
 	void BlockSHA1CRC(void* token, const unsigned char* data, size_t len);
 	void BlockCRC(void* token, const unsigned char* data, size_t len);
 	void CRCProxy(void* token, const unsigned char* data, size_t len);
-	void CRCZeroesProxy(void* token, size_t len);
 
 	void SHA1Init(SHA1_CTX* context);
 	void SHA1Update(SHA1_CTX* context, const uint8_t* data, const size_t len);
