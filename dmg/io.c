@@ -23,7 +23,7 @@
 
 #define SECTORS_AT_A_TIME 0x200
 
-typedef struct {
+typedef struct block {
 	size_t bufferSize;
 
 	uint32_t idx;
@@ -35,6 +35,8 @@ typedef struct {
 
 	unsigned char* outbuf;
 	size_t outsize;
+	
+	struct block* next;
 } block;
 
 typedef struct {
@@ -59,9 +61,11 @@ typedef struct {
 	void* uncompressedChkToken;
 	ChecksumFunc compressedChk;
 	void* compressedChkToken;
+	size_t nextPending;
+	block* pending;
 } threadData;
 
-block* blockAlloc(size_t bufferSize, size_t idx) {
+static block* blockAlloc(size_t bufferSize, size_t idx) {
 	block* b;
 	ASSERT(b = (block*)malloc(sizeof(block)), "malloc");
 
@@ -75,14 +79,14 @@ block* blockAlloc(size_t bufferSize, size_t idx) {
 	return b;
 }
 
-void blockFree(block* b) {
+static void blockFree(block* b) {
 	free(b->inbuf);
 	free(b->outbuf);
 	free(b);
 }
 
 // Return NULL when no more blocks
-block* readBlock(threadData* d) {
+static block* blockRead(threadData* d) {
 	if (d->numSectors == 0)
 		return NULL;
 	
@@ -135,7 +139,7 @@ block* readBlock(threadData* d) {
 	return b;
 }
 
-void blockCompress(block* b) {
+static void blockCompress(block* b) {
 	if (!b->keepRaw) {
 		bz_stream strm;
 		memset(&strm, 0, sizeof(strm));
@@ -168,7 +172,7 @@ void blockCompress(block* b) {
 	b->run.compLength = b->outsize;
 }
 
-void blockWrite(threadData* d, block* b) {
+static void blockWrite(threadData* d, block* b) {
 	if(d->uncompressedChk)
 		(*d->uncompressedChk)(d->uncompressedChkToken, b->inbuf, b->run.sectorCount * SECTOR_SIZE);
 	if(d->compressedChk)
@@ -188,16 +192,44 @@ void blockWrite(threadData* d, block* b) {
 	blockFree(b);
 }
 
-void *threadWorker(void* arg) {
+static void blockQueueForWrite(threadData* d, block* b) {
+	// Add to correct slot in ordered pending list
+	block** bp;
+	for (bp = &d->pending; *bp && (*bp)->idx < b->idx; bp = &(*bp)->next)
+		; // pass
+	b->next = *bp;
+	*bp = b;
+}
+
+static void blockWriteAll(threadData* d) {
+	while (d->pending && d->pending->idx == d->nextPending) {
+		block* next = d->pending->next;
+		blockWrite(d, d->pending);
+		d->nextPending++;
+		d->pending = next;
+	}
+}
+
+static void *threadWorker(void* arg) {
 	threadData* d = (threadData*)arg;
 	block *b;
 	
 	while(true) {
-		if (!(b = readBlock(d)))
+		block* b1 = blockRead(d);		
+		block* b2 = blockRead(d);
+		
+		if (b2) {
+			blockCompress(b2);
+			blockQueueForWrite(d, b2);
+		}
+		if (b1) {
+			blockCompress(b1);
+			blockQueueForWrite(d, b1);
+		}
+		blockWriteAll(d);
+		
+		if (!b2)
 			break;
-			
-		blockCompress(b);
-		blockWrite(d, b);		
 	}
 
 	return NULL;
@@ -215,6 +247,8 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 		.compressedChk = compressedChk_,
 		.compressedChkToken = compressedChkToken_,
 		.attribution = attribution_,
+		.nextPending = 0,
+		.pending = NULL,
 	};
 
 	td.blkx = (BLKXTable*) malloc(sizeof(BLKXTable) + (2 * sizeof(BLKXRun)));
