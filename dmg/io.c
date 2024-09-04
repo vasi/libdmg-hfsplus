@@ -4,6 +4,7 @@
 #include <zlib.h>
 #include <bzlib.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #include <dmg/dmg.h>
 #include <dmg/adc.h>
@@ -289,11 +290,17 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 	td.startOff = td.in->tell(td.in);
 	td.keepRaw = KeepNoneRaw;
 
-	pthread_t thread;
-	ASSERT(pthread_create(&thread, NULL, threadWorker, &td) == 0, "pthread_create");
-	void *ret;
-	ASSERT(pthread_join(thread, &ret) == 0, "pthread_join");
-	ASSERT(ret == NULL, "thread return");
+	size_t nthreads = sysconf(_SC_NPROCESSORS_ONLN) + 2; // input + output
+	pthread_t* threads;
+	ASSERT(threads = (pthread_t*) malloc(nthreads * sizeof(pthread_t)), "malloc");
+	size_t i;
+	for (i = 0; i < nthreads; i++)
+		ASSERT(pthread_create(&threads[i], NULL, threadWorker, &td) == 0, "pthread_create");
+	for (i = 0; i < nthreads; i++) {
+		void *ret;
+		ASSERT(pthread_join(threads[i], &ret) == 0, "pthread_join");
+		ASSERT(ret == NULL, "thread return");
+	}
 
 	if(td.curRun >= td.roomForRuns) {
 		td.roomForRuns <<= 1;
