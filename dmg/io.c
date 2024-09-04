@@ -135,6 +135,59 @@ block* readBlock(threadData* d) {
 	return b;
 }
 
+void blockCompress(block* b) {
+	if (!b->keepRaw) {
+		bz_stream strm;
+		memset(&strm, 0, sizeof(strm));
+		strm.bzalloc = Z_NULL;
+		strm.bzfree = Z_NULL;
+		strm.opaque = Z_NULL;
+		ASSERT(BZ2_bzCompressInit(&strm, 9, 0, 0) == BZ_OK, "BZ2_bzCompressInit");
+		strm.avail_in = b->insize;
+		strm.next_in = (char*)b->inbuf;
+		strm.avail_out = b->bufferSize;
+		strm.next_out = (char*)b->outbuf;
+
+		int ret;
+		ASSERT((ret = BZ2_bzCompress(&strm, BZ_FINISH)) != BZ_SEQUENCE_ERROR, "BZ2_bzCompress/BZ_SEQUENCE_ERROR");
+		if(ret != BZ_STREAM_END) {
+			ASSERT(FALSE, "BZ2_bzCompress");
+		}
+		BZ2_bzCompressEnd(&strm);
+		b->outsize = b->bufferSize - strm.avail_out;
+	}
+	
+	if(b->keepRaw || ((b->outsize / SECTOR_SIZE) >= (b->run.sectorCount - 15))) {
+		// printf("Setting type = BLOCK_RAW\n");
+		b->run.type = BLOCK_RAW;
+		memcpy(b->outbuf, b->inbuf, b->insize);
+		b->outsize = b->insize;
+	} else {
+		b->run.type = BLOCK_BZIP2;
+	}
+	b->run.compLength = b->outsize;
+}
+
+void blockWrite(threadData* d, block* b) {
+	if(d->uncompressedChk)
+		(*d->uncompressedChk)(d->uncompressedChkToken, b->inbuf, b->run.sectorCount * SECTOR_SIZE);
+	if(d->compressedChk)
+		(*d->compressedChk)(d->compressedChkToken, b->outbuf, b->outsize);
+	if (d->attribution)
+		d->attribution->observeBuffers(d->attribution, b->keepRaw, b->inbuf, b->insize, b->outbuf, b->outsize);		
+
+	b->run.compOffset = d->out->tell(d->out) - d->blkx->dataStart;
+	ASSERT(d->out->write(d->out, b->outbuf, b->outsize) == b->outsize, "fwrite");
+
+	if(b->idx >= d->roomForRuns) {
+		d->roomForRuns <<= 1;
+		d->blkx = (BLKXTable*) realloc(d->blkx, sizeof(BLKXTable) + (d->roomForRuns * sizeof(BLKXRun)));
+	}
+	d->blkx->runs[b->idx] = b->run;
+
+	blockFree(b);
+}
+
 void *threadWorker(void* arg) {
 	threadData* d = (threadData*)arg;
 	block *b;
@@ -142,55 +195,9 @@ void *threadWorker(void* arg) {
 	while(true) {
 		if (!(b = readBlock(d)))
 			break;
-		
-		if (!b->keepRaw) {
-			bz_stream strm;
-			memset(&strm, 0, sizeof(strm));
-			strm.bzalloc = Z_NULL;
-			strm.bzfree = Z_NULL;
-			strm.opaque = Z_NULL;
-			ASSERT(BZ2_bzCompressInit(&strm, 9, 0, 0) == BZ_OK, "BZ2_bzCompressInit");
-			strm.avail_in = b->insize;
-			strm.next_in = (char*)b->inbuf;
-			strm.avail_out = d->bufferSize;
-			strm.next_out = (char*)b->outbuf;
-
-			int ret;
-			ASSERT((ret = BZ2_bzCompress(&strm, BZ_FINISH)) != BZ_SEQUENCE_ERROR, "BZ2_bzCompress/BZ_SEQUENCE_ERROR");
-			if(ret != BZ_STREAM_END) {
-				ASSERT(FALSE, "BZ2_bzCompress");
-			}
-			BZ2_bzCompressEnd(&strm);
-			b->outsize = d->bufferSize - strm.avail_out;
-		}
-		
-		if(b->keepRaw || ((b->outsize / SECTOR_SIZE) >= (b->run.sectorCount - 15))) {
-			// printf("Setting type = BLOCK_RAW\n");
-			b->run.type = BLOCK_RAW;
-			memcpy(b->outbuf, b->inbuf, b->insize);
-			b->outsize = b->insize;
-		} else {
-			b->run.type = BLOCK_BZIP2;
-		}
-		b->run.compLength = b->outsize;
-
-		if(d->uncompressedChk)
-			(*d->uncompressedChk)(d->uncompressedChkToken, b->inbuf, b->run.sectorCount * SECTOR_SIZE);
-		if(d->compressedChk)
-			(*d->compressedChk)(d->compressedChkToken, b->outbuf, b->outsize);
-		if (d->attribution)
-			d->attribution->observeBuffers(d->attribution, b->keepRaw, b->inbuf, b->insize, b->outbuf, b->outsize);		
-
-		b->run.compOffset = d->out->tell(d->out) - d->blkx->dataStart;
-		ASSERT(d->out->write(d->out, b->outbuf, b->outsize) == b->outsize, "fwrite");
-
-		if(b->idx >= d->roomForRuns) {
-			d->roomForRuns <<= 1;
-			d->blkx = (BLKXTable*) realloc(d->blkx, sizeof(BLKXTable) + (d->roomForRuns * sizeof(BLKXRun)));
-		}
-		d->blkx->runs[b->idx] = b->run;
-
-		blockFree(b);
+			
+		blockCompress(b);
+		blockWrite(d, b);		
 	}
 
 	return NULL;
