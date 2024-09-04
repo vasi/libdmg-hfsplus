@@ -44,6 +44,7 @@ typedef struct {
 	AbstractAttribution* attribution;
 
 	// Read
+	pthread_mutex_t inMut;
 	AbstractFile* in;
 	uint32_t numSectors;
 	uint32_t curRun;
@@ -54,6 +55,7 @@ typedef struct {
 	enum ShouldKeepRaw keepRaw;
 
 	// Write
+	pthread_mutex_t outMut;
 	AbstractFile* out;
 	BLKXTable *blkx;
 	uint32_t roomForRuns;
@@ -87,8 +89,12 @@ static void blockFree(block* b) {
 
 // Return NULL when no more blocks
 static block* blockRead(threadData* d) {
-	if (d->numSectors == 0)
+	ASSERT(pthread_mutex_lock(&d->inMut) == 0, "pthread_mutex_lock");
+
+	if (d->numSectors == 0) {
+		ASSERT(pthread_mutex_unlock(&d->inMut) == 0, "pthread_mutex_unlock");
 		return NULL;
+	}
 	
 	block* b = blockAlloc(d->bufferSize, d->curRun);
 		
@@ -135,6 +141,8 @@ static block* blockRead(threadData* d) {
 	d->curSector += b->run.sectorCount;
 	d->numSectors -= b->run.sectorCount;
 	d->curRun++;
+
+	ASSERT(pthread_mutex_unlock(&d->inMut) == 0, "pthread_mutex_unlock");
 
 	return b;
 }
@@ -192,7 +200,7 @@ static void blockWrite(threadData* d, block* b) {
 	blockFree(b);
 }
 
-static void blockQueueForWrite(threadData* d, block* b) {
+static void blockQueue(threadData* d, block* b) {
 	// Add to correct slot in ordered pending list
 	block** bp;
 	for (bp = &d->pending; *bp && (*bp)->idx < b->idx; bp = &(*bp)->next)
@@ -210,26 +218,23 @@ static void blockWriteAll(threadData* d) {
 	}
 }
 
+static void blockQueueAndWrite(threadData* d, block* b) {
+	ASSERT(pthread_mutex_lock(&d->outMut) == 0, "pthread_mutex_lock");
+	blockQueue(d, b);
+	blockWriteAll(d);
+	ASSERT(pthread_mutex_unlock(&d->outMut) == 0, "pthread_mutex_unlock");
+}
+
 static void *threadWorker(void* arg) {
 	threadData* d = (threadData*)arg;
 	block *b;
 	
 	while(true) {
-		block* b1 = blockRead(d);		
-		block* b2 = blockRead(d);
-		
-		if (b2) {
-			blockCompress(b2);
-			blockQueueForWrite(d, b2);
-		}
-		if (b1) {
-			blockCompress(b1);
-			blockQueueForWrite(d, b1);
-		}
-		blockWriteAll(d);
-		
-		if (!b2)
+		if (!(b = blockRead(d)))
 			break;
+
+		blockCompress(b);
+		blockQueueAndWrite(d, b);
 	}
 
 	return NULL;
@@ -250,6 +255,8 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 		.nextPending = 0,
 		.pending = NULL,
 	};
+	pthread_mutex_init(&td.inMut, NULL);
+	pthread_mutex_init(&td.outMut, NULL);
 
 	td.blkx = (BLKXTable*) malloc(sizeof(BLKXTable) + (2 * sizeof(BLKXRun)));
 	td.roomForRuns = 2;
