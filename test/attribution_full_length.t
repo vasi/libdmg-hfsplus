@@ -21,9 +21,8 @@ Make a small HFS filesystem with a full length (1024 byte) attribution value:
 
 Echo it back, make sure it is the right length in the HFS filesystem:
 
-  $ $BUILDDIR/hfs/hfsplus output/full-length.hfs getattr a attr-key | wc -c \
-  >   | sed -e 's/^[[:space:]]*//'
-  1024
+  $ $BUILDDIR/hfs/hfsplus output/full-length.hfs getattr a attr-key | wc -c
+  \s*1024 (re)
 
 Build a DMG:
 
