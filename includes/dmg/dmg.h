@@ -337,6 +337,8 @@ extern "C" {
 	int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, unsigned int BlockSize, const char* sentinel);
 	int convertToISO(AbstractFile* abstractIn, AbstractFile* abstractOut);
 	int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut);
+
+	int reproRand();
 #ifdef __cplusplus
 }
 #endif

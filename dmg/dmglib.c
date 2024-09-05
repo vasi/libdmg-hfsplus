@@ -251,10 +251,10 @@ int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, unsigned int B
 	
 	koly.fUDIFSegmentNumber = 1;
 	koly.fUDIFSegmentCount = 1;
-	koly.fUDIFSegmentID.data1 = rand();
-	koly.fUDIFSegmentID.data2 = rand();
-	koly.fUDIFSegmentID.data3 = rand();
-	koly.fUDIFSegmentID.data4 = rand();
+	koly.fUDIFSegmentID.data1 = reproRand();
+	koly.fUDIFSegmentID.data2 = reproRand();
+	koly.fUDIFSegmentID.data3 = reproRand();
+	koly.fUDIFSegmentID.data4 = reproRand();
 	koly.fUDIFDataForkChecksum.type = CHECKSUM_UDIF_CRC32;
 	koly.fUDIFDataForkChecksum.bitness = checksumBitness(CHECKSUM_UDIF_CRC32);
 	koly.fUDIFDataForkChecksum.data[0] = dataForkChecksum;
@@ -474,10 +474,10 @@ int convertToDMG(AbstractFile* abstractIn, AbstractFile* abstractOut) {
 	
 	koly.fUDIFSegmentNumber = 1;
 	koly.fUDIFSegmentCount = 1;
-	koly.fUDIFSegmentID.data1 = rand();
-	koly.fUDIFSegmentID.data2 = rand();
-	koly.fUDIFSegmentID.data3 = rand();
-	koly.fUDIFSegmentID.data4 = rand();
+	koly.fUDIFSegmentID.data1 = reproRand();
+	koly.fUDIFSegmentID.data2 = reproRand();
+	koly.fUDIFSegmentID.data3 = reproRand();
+	koly.fUDIFSegmentID.data4 = reproRand();
 	koly.fUDIFDataForkChecksum.type = CHECKSUM_UDIF_CRC32;
 	koly.fUDIFDataForkChecksum.bitness = checksumBitness(CHECKSUM_UDIF_CRC32);
 	koly.fUDIFDataForkChecksum.data[0] = dataForkChecksum;
