@@ -65,7 +65,7 @@ uint32_t MKBlockChecksum(uint32_t* ckSum, const unsigned char* data, size_t len)
 
 uint32_t CRC32Checksum(uint32_t* ckSum, const unsigned char *buf, size_t len)
 {
-  return (*ckSum = crc32_z(*ckSum, buf, len));
+  return (*ckSum = crc32(*ckSum, buf, len));
 }
 
 /*

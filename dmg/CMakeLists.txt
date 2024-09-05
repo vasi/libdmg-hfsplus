@@ -27,7 +27,7 @@ IF(OPENSSL_FOUND)
 	ENDIF(WIN32)
 ENDIF(OPENSSL_FOUND)
 
-target_link_libraries(dmg common hfs z bz2)
+target_link_libraries(dmg common hfs z bz2 pthread)
 
 add_executable(dmg-bin dmg.c)
 target_link_libraries (dmg-bin dmg)
