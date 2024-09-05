@@ -79,10 +79,10 @@ Note the "attr-value-p" suffix below!
   @@ -17159,8 +17159,8 @@
    00043060: 0000 0000 0000 0000 0000 0004 064c 0000  .............L..
    00043070: 0000 0000 0000 0000 0000 0000 0000 0000  ................
-   00043080: 0001 0000 0001 7348 3366 6998 3c64 c623  ......sH3fi.<d.#
-  -00043090: 7b32 6745 8b6b 0000 0002 0000 0020 8e77  {2gE.k....... .w
+   00043080: 0001 0000 0001 eb5c 786b 46de ad94 8d44  .......\xkF....D
+  -00043090: 1779 e9f9 9d21 0000 0002 0000 0020 8e77  .y...!....... .w
   -000430a0: 24c9 0000 0000 0000 0000 0000 0000 0000  $...............
-  +00043090: 7b32 6745 8b6b 0000 0002 0000 0020 8eb5  {2gE.k....... ..
+  +00043090: 1779 e9f9 9d21 0000 0002 0000 0020 8eb5  .y...!....... ..
   +000430a0: c555 0000 0000 0000 0000 0000 0000 0000  .U..............
    000430b0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
    000430c0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
@@ -438,8 +438,8 @@ Check resources:
 Line in the sand:
 
   $ shasum testa.dmg testb.dmg
-  85f7e85acef53b63fc199e84ff801ae96b3e8c83  testa.dmg
-  ef6e91b330f5eacd10eb5e37603b8baa06d4a1a4  testb.dmg
+  258b553fad5970e726db2bbac6d40131fa0ca8b9  testa.dmg
+  473866b04c74f32a2be03f064721f48441a880b0  testb.dmg
 
 Attribute:
 
@@ -484,8 +484,8 @@ Unfortunately, attributing builds does not update the cSum block, so we expect s
    00042450: 344b 4354 7870 626e 526c 5a32 5679 0a09  4KCTxpbnRlZ2Vy..
   [1]
   $ shasum testb.dmg testa_updated.dmg
-  ef6e91b330f5eacd10eb5e37603b8baa06d4a1a4  testb.dmg
-  41fadf80df5625ac458a0c1c548f37afbc41b06e  testa_updated.dmg
+  473866b04c74f32a2be03f064721f48441a880b0  testb.dmg
+  e60433ef2b55768d9b5c60c42f011f3eb850d89c  testa_updated.dmg
 
 However, if we revert, the checksums should match again:
 We could also revert:
@@ -497,5 +497,5 @@ Note -- same same:
   $ xxd testa_reverted.dmg > testa_reverted.txt
   $ diff --unified=3 testa.txt testa_reverted.txt
   $ shasum testa.dmg testa_reverted.dmg
-  85f7e85acef53b63fc199e84ff801ae96b3e8c83  testa.dmg
-  85f7e85acef53b63fc199e84ff801ae96b3e8c83  testa_reverted.dmg
+  258b553fad5970e726db2bbac6d40131fa0ca8b9  testa.dmg
+  258b553fad5970e726db2bbac6d40131fa0ca8b9  testa_reverted.dmg
