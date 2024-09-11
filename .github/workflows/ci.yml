@@ -1,0 +1,31 @@
+name: Github Actions CI
+on:
+  push:
+  pull_request:
+jobs:
+  cram:
+    strategy:
+      matrix:
+        os:
+          - ubuntu-24.04
+          - ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: get dependencies
+        run: >
+          sudo apt-get update &&
+          sudo apt-get install -y cmake g++ libbz2-dev libz-dev pipx
+      - name: get cram
+        run: >
+          pipx install cram &&
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: cmake setup
+        run: cmake -B build .
+      - name: run tests
+        run: >
+          ls test/*.t | grep -v reference | while read tst; do
+            echo $tst
+            cram $tst
+          done
