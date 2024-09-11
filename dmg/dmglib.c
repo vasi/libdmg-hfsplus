@@ -251,7 +251,7 @@ int buildDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, unsigned int B
 	
 	koly.fUDIFSegmentNumber = 1;
 	koly.fUDIFSegmentCount = 1;
-	koly.fUDIFSegmentID.data1 = rand();
+	koly.fUDIFSegmentID.data1 = rand() + 1;
 	koly.fUDIFSegmentID.data2 = rand();
 	koly.fUDIFSegmentID.data3 = rand();
 	koly.fUDIFSegmentID.data4 = rand();
