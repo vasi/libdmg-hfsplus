@@ -28,4 +28,4 @@ jobs:
         load: true
         tags: libdmg-hfsplus:test
     - name: test
-      run: docker rm --rm libdmg-hfsplus:test
+      run: docker run --rm libdmg-hfsplus:test
