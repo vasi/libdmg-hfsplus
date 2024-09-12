@@ -27,5 +27,7 @@ jobs:
       with:
         load: true
         tags: libdmg-hfsplus:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
     - name: test
       run: docker run --rm libdmg-hfsplus:test
