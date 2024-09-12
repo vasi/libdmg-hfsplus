@@ -22,5 +22,6 @@ RUN mkdir -p /test/build/dmg /test/build/hfs
 COPY --from=build /build/dmg/dmg /test/build/dmg/dmg
 COPY --from=build /build/hfs/hfsplus /test/build/hfs/hfsplus
 COPY test /test/test
+COPY LICENSE /test
 WORKDIR /test
 CMD ["/bin/sh", "-c", "cram test/*.t"]
