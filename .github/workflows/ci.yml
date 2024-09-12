@@ -27,5 +27,6 @@ jobs:
         run: >
           ls test/*.t | grep -v reference | while read tst; do
             echo $tst
+            if [ "$tst" = "test/attribution.t" ]; then false; fi
             cram $tst
           done
