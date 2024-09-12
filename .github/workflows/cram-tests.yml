@@ -2,7 +2,6 @@ name: run cram tests
 
 on:
   push:
-    branches: ["mozilla"]
   pull_request:
     branches: ["mozilla"]
 
