@@ -1,13 +1,12 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <zlib.h>
 #include <bzlib.h>
 #include <pthread.h>
 #include <unistd.h>
 
 #include <dmg/dmg.h>
-#include <dmg/adc.h>
+#include <dmg/compress.h>
 #include <dmg/attribution.h>
 #include <inttypes.h>
 
@@ -152,9 +151,9 @@ static void blockCompress(block* b) {
 	if (!b->keepRaw) {
 		bz_stream strm;
 		memset(&strm, 0, sizeof(strm));
-		strm.bzalloc = Z_NULL;
-		strm.bzfree = Z_NULL;
-		strm.opaque = Z_NULL;
+		strm.bzalloc = NULL;
+		strm.bzfree = NULL;
+		strm.opaque = NULL;
 		ASSERT(BZ2_bzCompressInit(&strm, 9, 0, 0) == BZ_OK, "BZ2_bzCompressInit");
 		strm.avail_in = b->insize;
 		strm.next_in = (char*)b->inbuf;
@@ -327,18 +326,18 @@ void extractBLKX(AbstractFile* in, AbstractFile* out, BLKXTable* blkx) {
 	unsigned char* outBuffer;
 	unsigned char zero;
 	size_t bufferSize;
+	size_t outBufSize;
 	size_t have;
+	size_t expectedSize;
 	off_t initialOffset;
 	int i;
 	int ret;
 
-	z_stream strm;
-	bz_stream bzstrm;
-
 	bufferSize = SECTOR_SIZE * blkx->decompressBufferRequested;
-
 	ASSERT(inBuffer = (unsigned char*) malloc(bufferSize), "malloc");
-	ASSERT(outBuffer = (unsigned char*) malloc(bufferSize), "malloc");
+
+	outBufSize = bufferSize;
+	ASSERT(outBuffer = (unsigned char*) malloc(outBufSize), "malloc");
 
 	initialOffset =	out->tell(out);
 	ASSERT(initialOffset != -1, "ftello");
@@ -365,44 +364,9 @@ void extractBLKX(AbstractFile* in, AbstractFile* out, BLKXTable* blkx) {
 
 		printf("run %d: start=%" PRId64 " sectors=%" PRId64 ", length=%" PRId64 ", fileOffset=0x%" PRIx64 "\n", i, initialOffset + (blkx->runs[i].sectorStart * SECTOR_SIZE), blkx->runs[i].sectorCount, blkx->runs[i].compLength, blkx->runs[i].compOffset);
 
+
+
 		switch(blkx->runs[i].type) {
-			case BLOCK_ADC:
-                        {
-                                size_t bufferRead = 0;
-				do {
-					ASSERT((strm.avail_in = in->read(in, inBuffer, blkx->runs[i].compLength)) == blkx->runs[i].compLength, "fread");
-					strm.avail_out = adc_decompress(strm.avail_in, inBuffer, bufferSize, outBuffer, &have);
-					ASSERT(out->write(out, outBuffer, have) == have, "mWrite");
-					bufferRead+=strm.avail_out;
-				} while (bufferRead < blkx->runs[i].compLength);
-				break;
-                        }
-
-			case BLOCK_ZLIB:
-				strm.zalloc = Z_NULL;
-				strm.zfree = Z_NULL;
-				strm.opaque = Z_NULL;
-				strm.avail_in = 0;
-				strm.next_in = Z_NULL;
-
-				ASSERT(inflateInit(&strm) == Z_OK, "inflateInit");
-
-				ASSERT((strm.avail_in = in->read(in, inBuffer, blkx->runs[i].compLength)) == blkx->runs[i].compLength, "fread");
-				strm.next_in = inBuffer;
-
-				do {
-					strm.avail_out = bufferSize;
-					strm.next_out = outBuffer;
-					ASSERT((ret = inflate(&strm, Z_NO_FLUSH)) != Z_STREAM_ERROR, "inflate/Z_STREAM_ERROR");
-					if(ret != Z_OK && ret != Z_BUF_ERROR && ret != Z_STREAM_END) {
-						ASSERT(FALSE, "inflate");
-					}
-					have = bufferSize - strm.avail_out;
-					ASSERT(out->write(out, outBuffer, have) == have, "mWrite");
-				} while (strm.avail_out == 0);
-
-				ASSERT(inflateEnd(&strm) == Z_OK, "inflateEnd");
-				break;
 			case BLOCK_RAW:
 				if(blkx->runs[i].compLength > bufferSize) {
 					uint64_t left = blkx->runs[i].compLength;
@@ -426,31 +390,22 @@ void extractBLKX(AbstractFile* in, AbstractFile* out, BLKXTable* blkx) {
 				break;
 			case BLOCK_IGNORE:
 				break;
-			case BLOCK_BZIP2:
-				bzstrm.bzalloc = Z_NULL;
-				bzstrm.bzfree = Z_NULL;
-				bzstrm.opaque = Z_NULL;
-				bzstrm.avail_in = 0;
-				bzstrm.next_in = Z_NULL;
-				ASSERT(BZ2_bzDecompressInit(&bzstrm, 0, 0) == BZ_OK, "BZ2_bzDecompressInit");
-				ASSERT((bzstrm.avail_in = in->read(in, inBuffer, blkx->runs[i].compLength)) == blkx->runs[i].compLength, "fread");
-				bzstrm.next_in = (char*)inBuffer;
-				do {
-					bzstrm.avail_out = bufferSize;
-					bzstrm.next_out = (char*)outBuffer;
-					ASSERT((ret = BZ2_bzDecompress(&bzstrm)) >= 0, "BZ2_bzDecompress");
-					have = bufferSize - bzstrm.avail_out;
-					ASSERT(out->write(out, outBuffer, have) == have, "mWrite");
-				} while (bzstrm.avail_out == 0);
-				ASSERT(BZ2_bzDecompressEnd(&bzstrm) == BZ_OK, "BZ2_bzDecompressEnd");
-				break;
 			case BLOCK_COMMENT:
 				break;
 			case BLOCK_TERMINATOR:
 				break;
 			default:
-				fprintf(stderr, "Unknown block type: %#08x\n", blkx->runs[i].type);
-				exit(1);
+				expectedSize = blkx->runs[i].sectorCount * SECTOR_SIZE;
+				if (expectedSize > outBufSize) {
+					/* in case decompressBufferRequested is not enough for one-shot decompression */
+					outBufSize = expectedSize;
+					outBuffer = (unsigned char*) realloc(outBuffer, outBufSize);
+				}
+
+				ASSERT(in->read(in, inBuffer, blkx->runs[i].compLength) == blkx->runs[i].compLength, "fread");
+				ASSERT(decompressRun(blkx->runs[i].type, inBuffer, blkx->runs[i].compLength, outBuffer, outBufSize, expectedSize) == 0,
+					"decompression failed");
+				ASSERT(out->write(out, outBuffer, expectedSize) == expectedSize, "mWrite");
 		}
 	}
 

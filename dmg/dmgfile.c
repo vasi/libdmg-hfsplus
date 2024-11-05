@@ -5,17 +5,13 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <zlib.h>
-#include <bzlib.h>
 
 #include <dmg/dmg.h>
-#include <dmg/adc.h>
+#include <dmg/compress.h>
 #include <dmg/dmgfile.h>
 
 static void cacheRun(DMG* dmg, BLKXTable* blkx, int run) {
 	size_t bufferSize;
-	z_stream strm;
-	bz_stream bzstrm;
 	void* inBuffer;
 	int ret;
 	size_t have;
@@ -33,41 +29,6 @@ static void cacheRun(DMG* dmg, BLKXTable* blkx, int run) {
 	ASSERT(dmg->dmg->seek(dmg->dmg, blkx->dataStart + blkx->runs[run].compOffset) == 0, "fseeko");
 
     switch(blkx->runs[run].type) {
-                 case BLOCK_ADC:
-                 {
-			 size_t bufferRead = 0;
-			 do {
-				 strm.avail_in = dmg->dmg->read(dmg->dmg, inBuffer, blkx->runs[run].compLength);
-				 strm.avail_out = adc_decompress(strm.avail_in, inBuffer, bufferSize, dmg->runData, &have);
-				 bufferRead+=strm.avail_out;
-			 } while (bufferRead < blkx->runs[run].compLength);
-			 break;
-                }
-
-		case BLOCK_ZLIB:
-			strm.zalloc = Z_NULL;
-			strm.zfree = Z_NULL;
-			strm.opaque = Z_NULL;
-			strm.avail_in = 0;
-			strm.next_in = Z_NULL;
-
-			ASSERT(inflateInit(&strm) == Z_OK, "inflateInit");
-
-			ASSERT((strm.avail_in = dmg->dmg->read(dmg->dmg, inBuffer, blkx->runs[run].compLength)) == blkx->runs[run].compLength, "fread");
-			strm.next_in = (unsigned char*) inBuffer;
-
-			do {
-				strm.avail_out = bufferSize;
-				strm.next_out = (unsigned char*) dmg->runData;
-				ASSERT((ret = inflate(&strm, Z_NO_FLUSH)) != Z_STREAM_ERROR, "inflate/Z_STREAM_ERROR");
-				if(ret != Z_OK && ret != Z_BUF_ERROR && ret != Z_STREAM_END) {
-					ASSERT(FALSE, "inflate");
-				}
-				have = bufferSize - strm.avail_out;
-			} while (strm.avail_out == 0);
-
-			ASSERT(inflateEnd(&strm) == Z_OK, "inflateEnd");
-			break;
 		case BLOCK_RAW:
 			ASSERT((have = dmg->dmg->read(dmg->dmg, dmg->runData, blkx->runs[run].compLength)) == blkx->runs[run].compLength, "fread");
 			break;
@@ -77,29 +38,12 @@ static void cacheRun(DMG* dmg, BLKXTable* blkx, int run) {
 			break;
 		case BLOCK_TERMINATOR:
 			break;
-        case BLOCK_ZEROES:
-            break;
-		case BLOCK_BZIP2:
-			bzstrm.bzalloc = Z_NULL;
-			bzstrm.bzfree = Z_NULL;
-			bzstrm.opaque = Z_NULL;
-			bzstrm.avail_in = 0;
-			bzstrm.next_in = Z_NULL;
-			ASSERT(BZ2_bzDecompressInit(&bzstrm, 0, 0) == BZ_OK, "BZ2_bzDecompressInit");
-			ASSERT((bzstrm.avail_in = dmg->dmg->read(dmg->dmg, inBuffer, blkx->runs[run].compLength)) == blkx->runs[run].compLength, "fread");
-			bzstrm.next_in = (char*)inBuffer;
-			do {
-				bzstrm.avail_out = bufferSize;
-				bzstrm.next_out = (char*) dmg->runData;
-				ASSERT((ret = BZ2_bzDecompress(&bzstrm)) >= 0, "BZ2_bzDecompress");
-				have = bufferSize - bzstrm.avail_out;
-			} while (strm.avail_out == 0);
-			ASSERT(BZ2_bzDecompressEnd(&bzstrm) == BZ_OK, "BZ2_bzDecompressEnd");
+		case BLOCK_ZEROES:
 			break;
 		default:
-            fprintf(stderr, "error: unsupported block type %08x", blkx->runs[run].type);
-            exit(1);
-			break;
+				ASSERT(dmg->dmg->read(dmg->dmg, inBuffer, blkx->runs[run].compLength) == blkx->runs[run].compLength, "fread");
+				ASSERT(decompressRun(blkx->runs[run].type, inBuffer, blkx->runs[run].compLength, dmg->runData, bufferSize, bufferSize) == 0,
+					"decompression failed");
     }
 	free(inBuffer);
 

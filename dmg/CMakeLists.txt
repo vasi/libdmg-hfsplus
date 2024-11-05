@@ -16,7 +16,7 @@ link_directories(${BZIP2_LIBRARIES})
 
 link_directories(${PROJECT_BINARY_DIR}/common ${PROJECT_BINARY_DIR}/hfs)
 
-add_library(dmg adc.c attribution.c checksum.c dmgfile.c dmglib.c filevault.c io.c partition.c resources.c udif.c ../includes/dmg/adc.h ../includes/dmg/attribution.h ../includes/dmg/dmg.h ../includes/dmg/dmgfile.h ../includes/dmg/dmglib.h ../includes/dmg/filevault.h)
+add_library(dmg adc.c attribution.c checksum.c compress.c dmgfile.c dmglib.c filevault.c io.c partition.c resources.c udif.c ../includes/dmg/adc.h ../includes/dmg/attribution.h ../includes/dmg/dmg.h ../includes/dmg/dmgfile.h ../includes/dmg/dmglib.h ../includes/dmg/filevault.h)
 
 IF(OPENSSL_FOUND)
 	add_definitions(-DHAVE_CRYPT)
