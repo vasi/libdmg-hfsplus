@@ -20,6 +20,20 @@
   }
 #endif
 
+static int bzip2Compress(unsigned char* inBuffer, size_t inSize,
+                         unsigned char* outBuffer, size_t outBufSize, size_t *compSize)
+{
+  *compSize = outBufSize;
+  return (BZ2_bzBuffToBuffCompress(outBuffer, &compSize, inBuffer, inSize, 9, 0, 0) != BZ_OK);
+}
+
+void getCompressor(Compressor *comp, char *name)
+{
+  // TODO
+  comp->compress = bzip2Compress;
+  comp->block_type = BLOCK_BZIP2;
+}
+
 int decompressRun(uint32_t type,
                   unsigned char* inBuffer, size_t inSize,
                   unsigned char* outBuffer, size_t outBufSize, size_t expectedSize)

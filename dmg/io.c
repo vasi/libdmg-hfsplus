@@ -63,6 +63,7 @@ typedef struct {
 	void* uncompressedChkToken;
 	ChecksumFunc compressedChk;
 	void* compressedChkToken;
+	Compressor *compressor;
 	size_t nextPending;
 	block* pending;
 } threadData;
@@ -147,26 +148,10 @@ static block* blockRead(threadData* d) {
 	return b;
 }
 
-static void blockCompress(block* b) {
+static void blockCompress(block* b, Compressor* comp) {
 	if (!b->keepRaw) {
-		bz_stream strm;
-		memset(&strm, 0, sizeof(strm));
-		strm.bzalloc = NULL;
-		strm.bzfree = NULL;
-		strm.opaque = NULL;
-		ASSERT(BZ2_bzCompressInit(&strm, 9, 0, 0) == BZ_OK, "BZ2_bzCompressInit");
-		strm.avail_in = b->insize;
-		strm.next_in = (char*)b->inbuf;
-		strm.avail_out = b->bufferSize;
-		strm.next_out = (char*)b->outbuf;
-
-		int ret;
-		ASSERT((ret = BZ2_bzCompress(&strm, BZ_FINISH)) != BZ_SEQUENCE_ERROR, "BZ2_bzCompress/BZ_SEQUENCE_ERROR");
-		if(ret != BZ_STREAM_END) {
-			ASSERT(FALSE, "BZ2_bzCompress");
-		}
-		BZ2_bzCompressEnd(&strm);
-		b->outsize = b->bufferSize - strm.avail_out;
+		int ret = comp->compress(b->inbuf, b->insize, b->outbuf, b->bufferSize, &b->outsize);
+		ASSERT(ret == 0, "compression failed");
 	}
 	
 	if(b->keepRaw || ((b->outsize / SECTOR_SIZE) >= (b->run.sectorCount - 15))) {
@@ -175,7 +160,7 @@ static void blockCompress(block* b) {
 		memcpy(b->outbuf, b->inbuf, b->insize);
 		b->outsize = b->insize;
 	} else {
-		b->run.type = BLOCK_BZIP2;
+		b->run.type = comp->block_type;
 	}
 	b->run.compLength = b->outsize;
 }
@@ -233,7 +218,7 @@ static void *threadWorker(void* arg) {
 		if (!(b = blockRead(d)))
 			break;
 
-		blockCompress(b);
+		blockCompress(b, d->compressor);
 		blockQueueAndWrite(d, b);
 	}
 
@@ -242,7 +227,13 @@ static void *threadWorker(void* arg) {
 
 BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSectorNumber, uint32_t numSectors_, uint32_t blocksDescriptor,
 			uint32_t checksumType, ChecksumFunc uncompressedChk_, void* uncompressedChkToken_, ChecksumFunc compressedChk_,
-			void* compressedChkToken_, Volume* volume, AbstractAttribution* attribution_) {
+			void* compressedChkToken_, Volume* volume, AbstractAttribution* attribution_, Compressor* comp_) {
+	Compressor comp;
+	if (comp_)
+		comp = *comp_;
+	else
+		getCompressor(&comp, NULL);
+
 	threadData td = {
 		.out = out_,
 		.in = in_,
@@ -254,6 +245,7 @@ BLKXTable* insertBLKX(AbstractFile* out_, AbstractFile* in_, uint32_t firstSecto
 		.attribution = attribution_,
 		.nextPending = 0,
 		.pending = NULL,
+		.compressor = &comp,
 	};
 	pthread_mutex_init(&td.inMut, NULL);
 	pthread_mutex_init(&td.outMut, NULL);

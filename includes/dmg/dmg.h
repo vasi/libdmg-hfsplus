@@ -9,6 +9,7 @@
 #include "abstractfile.h"
 #include "attribution.h"
 #include "common.h"
+#include "compress.h"
 
 #define CHECKSUM_UDIF_CRC32 0x00000002
 #define CHECKSUM_MD5 0x00000004
@@ -329,7 +330,7 @@ extern "C" {
 	void extractBLKX(AbstractFile* in, AbstractFile* out, BLKXTable* blkx);
 	BLKXTable* insertBLKX(AbstractFile* out, AbstractFile* in, uint32_t firstSectorNumber, uint32_t numSectors, uint32_t blocksDescriptor,
 	            uint32_t checksumType, ChecksumFunc uncompressedChk, void* uncompressedChkToken, ChecksumFunc compressedChk,
-				void* compressedChkToken, Volume* volume, AbstractAttribution* attribution);
+				void* compressedChkToken, Volume* volume, AbstractAttribution* attribution, Compressor* comp);
 
 
 	int extractDmg(AbstractFile* abstractIn, AbstractFile* abstractOut, int partNum);
