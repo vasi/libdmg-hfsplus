@@ -29,6 +29,7 @@ typedef enum AbstractFileType {
 
 struct AbstractFile {
 	void* data;
+	int printSeeks;
 	WriteFunc write;
 	ReadFunc read;
 	SeekFunc seek;

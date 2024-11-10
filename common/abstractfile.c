@@ -16,6 +16,12 @@ size_t fwriteWrapper(AbstractFile* file, const void* data, size_t len) {
 }
 
 int fseekWrapper(AbstractFile* file, off_t offset) {
+	if (file->printSeeks) {
+		off_t pos = ftello((FILE*) (file->data));
+		if (pos > offset) {
+			fprintf(stderr, "seek %ld -> %ld\n", pos, offset);
+		}
+	}
   return fseeko((FILE*) (file->data), offset, SEEK_SET);
 }
 
@@ -38,6 +44,7 @@ off_t fileGetLength(AbstractFile* file) {
 	length = ftello((FILE*) (file->data));
 
 	fseeko((FILE*) (file->data), pos, SEEK_SET);
+	fprintf(stderr, "length: %ld\n", length);
 
 	return length;
 }
@@ -58,6 +65,7 @@ AbstractFile* createAbstractFileFromFile(FILE* file) {
 	toReturn->getLength = fileGetLength;
 	toReturn->close = fcloseWrapper;
 	toReturn->type = AbstractFileTypeFile;
+	toReturn->printSeeks = 0;
 	return toReturn;
 }
 

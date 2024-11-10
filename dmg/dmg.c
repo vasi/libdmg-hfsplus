@@ -21,6 +21,7 @@ int buildInOut(const char* source, const char* dest, AbstractFile** in, Abstract
 		printf("cannot open source: %s\n", source);
 		return FALSE;
 	}
+	(*in)->printSeeks = 1;
 
 	*out = createAbstractFileFromFile(strcmp(dest, "-") == 0 ? stdout : fopen(dest, "wb"));
 	if(!(*out)) {
